@@ -7,6 +7,8 @@ export const orders = sqliteTable("orders", {
   purchaseDate: text("purchase_date"),
   status: text("status"),
   customField: text("custom_field"),
+  sku: text("sku"),
+  buyerName: text("buyer_name"),
   raw: text("raw").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)

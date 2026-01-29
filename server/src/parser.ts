@@ -24,7 +24,9 @@ export const HEADER_ALIASES = {
   orderId: ["orderid", "amazonorderid", "id"],
   purchaseDate: ["purchasedate", "orderdate", "date"],
   status: ["status", "orderstatus"],
-  customField: ["custom", "customfield", "customfieldvalue"]
+  customField: ["custom", "customfield", "customfieldvalue"],
+  sku: ["sku", "itemsku", "productsku"],
+  buyerName: ["buyername", "buyer", "customername"]
 } as const;
 
 const normalizedRecordSchema = z.object({
@@ -32,12 +34,47 @@ const normalizedRecordSchema = z.object({
   purchaseDate: z.string().optional(),
   status: z.string().optional(),
   customField: z.string().optional(),
+  sku: z.string().optional(),
+  buyerName: z.string().optional(),
   raw: z.string()
 });
 
 export type NormalizedRecord = z.infer<typeof normalizedRecordSchema>;
 
-export function normalizeRecord(record: Record<string, unknown>): NormalizedRecord {
+export function getByPath(obj: unknown, path: string | undefined) {
+  if (!path) {
+    return undefined;
+  }
+
+  const segments = path.split(".").filter(Boolean);
+  let current: unknown = obj;
+
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+
+    const index = Number(segment);
+
+    if (Array.isArray(current) && !Number.isNaN(index)) {
+      current = current[index];
+      continue;
+    }
+
+    if (typeof current !== "object") {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current;
+}
+
+export function normalizeRecord(
+  record: Record<string, unknown>,
+  overrides: Partial<NormalizedRecord> = {}
+): NormalizedRecord {
   const normalizedMap = new Map<string, string>();
 
   for (const [key, value] of Object.entries(record)) {
@@ -57,16 +94,24 @@ export function normalizeRecord(record: Record<string, unknown>): NormalizedReco
     return undefined;
   };
 
-  const orderId = getByAliases(HEADER_ALIASES.orderId);
-  const purchaseDate = getByAliases(HEADER_ALIASES.purchaseDate);
-  const status = getByAliases(HEADER_ALIASES.status);
-  const customField = getByAliases(HEADER_ALIASES.customField);
+  const orderId = overrides.orderId ?? getByAliases(HEADER_ALIASES.orderId);
+  const purchaseDate =
+    overrides.purchaseDate ?? getByAliases(HEADER_ALIASES.purchaseDate);
+  const status = overrides.status ?? getByAliases(HEADER_ALIASES.status);
+  const customField =
+    overrides.customField ?? getByAliases(HEADER_ALIASES.customField);
+  const sku = overrides.sku ?? getByAliases(HEADER_ALIASES.sku);
+  const buyerName =
+    overrides.buyerName ?? getByAliases(HEADER_ALIASES.buyerName);
+  const raw = overrides.raw ?? JSON.stringify(record);
 
   return normalizedRecordSchema.parse({
     orderId,
     purchaseDate,
     status,
     customField,
-    raw: JSON.stringify(record)
+    sku,
+    buyerName,
+    raw
   });
 }

@@ -18,8 +18,16 @@ runMigrations();
 
 app.get("/health", async () => ({ ok: true }));
 
-app.post("/sync", async () => {
-  return syncOrders();
+app.post("/sync", async (request, reply) => {
+  try {
+    return await syncOrders();
+  } catch (error) {
+    request.log.error({ err: error }, "Sync failed");
+    reply.code(500);
+    return {
+      error: error instanceof Error ? error.message : "Sync failed"
+    };
+  }
 });
 
 app.get("/orders", async (request) => {

@@ -4,6 +4,8 @@ type Order = {
   id: number;
   orderId: string;
   purchaseDate: string | null;
+  sku: string | null;
+  buyerName: string | null;
   customField: string | null;
 };
 
@@ -29,8 +31,24 @@ export default function App() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await fetch(`${API_URL}/sync`, { method: "POST" });
+      const response = await fetch(`${API_URL}/sync`, { method: "POST" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message =
+          typeof data?.error === "string"
+            ? data.error
+            : `Sync failed (${response.status})`;
+        throw new Error(message);
+      }
       await fetchOrders();
+      setToast("Sync completed.");
+      setTimeout(() => setToast(null), 4000);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sync failed. Check console.";
+      console.error(error);
+      setToast(message);
+      setTimeout(() => setToast(null), 6000);
     } finally {
       setSyncing(false);
     }
@@ -84,6 +102,8 @@ export default function App() {
                 <tr>
                   <th className="px-4 py-3">Order ID</th>
                   <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">SKU</th>
+                  <th className="px-4 py-3">Buyer</th>
                   <th className="px-4 py-3">Custom Field</th>
                   <th className="px-4 py-3">EzCad</th>
                 </tr>
@@ -91,13 +111,13 @@ export default function App() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
+                    <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
                       Loading...
                     </td>
                   </tr>
                 ) : orders.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
+                    <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
                       No orders found.
                     </td>
                   </tr>
@@ -109,6 +129,12 @@ export default function App() {
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {order.purchaseDate ?? "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {order.sku ?? "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {order.buyerName ?? "-"}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {order.customField ?? "-"}

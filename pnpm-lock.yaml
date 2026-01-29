@@ -25,6 +25,9 @@ importers:
       drizzle-orm:
         specifier: ^0.33.0
         version: 0.33.0(@types/react@18.3.27)(better-sqlite3@9.6.0)(react@18.3.1)
+      fast-xml-parser:
+        specifier: ^5.3.3
+        version: 5.3.3
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
@@ -1270,6 +1273,10 @@ packages:
   fast-uri@3.1.0:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
 
+  fast-xml-parser@5.3.3:
+    resolution: {integrity: sha512-2O3dkPAAC6JavuMm8+4+pgTk+5hoAs+CjZ+sWcQLkX9+/tHRuTkQh/Oaifr8qDmZ8iEHb771Ea6G8CdwkrgvYA==}
+    hasBin: true
+
   fastify-plugin@4.5.1:
     resolution: {integrity: sha512-stRHYGeuqpEZTL1Ef0Ovr2ltazUT9g844X5z/zEBFLG8RYlpDiOCIG+ATvYEp+/zmc7sN29mcIMp8gvYplYPIQ==}
 
@@ -1700,6 +1707,9 @@ packages:
   strip-json-comments@2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
+
+  strnum@2.1.2:
+    resolution: {integrity: sha512-l63NF9y/cLROq/yqKXSLtcMeeyOfnSQlfMSlzFt/K73oIaD8DGaQWd7Z34X9GPiKqP5rbSh84Hl4bOlLcjiSrQ==}
 
   sucrase@3.35.1:
     resolution: {integrity: sha512-DhuTmvZWux4H1UOnWMB3sk0sbaCVOoQZjv8u1rDoTV0HTdGem9hkAZtl4JZy8P2z4Bg0nT+YMeOFyVr4zcG5Tw==}
@@ -2703,6 +2713,10 @@ snapshots:
 
   fast-uri@3.1.0: {}
 
+  fast-xml-parser@5.3.3:
+    dependencies:
+      strnum: 2.1.2
+
   fastify-plugin@4.5.1: {}
 
   fastify@4.29.1:
@@ -3117,6 +3131,8 @@ snapshots:
       safe-buffer: 5.2.1
 
   strip-json-comments@2.0.1: {}
+
+  strnum@2.1.2: {}
 
   sucrase@3.35.1:
     dependencies:

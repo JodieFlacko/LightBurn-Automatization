@@ -2,10 +2,11 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
+import { XMLParser } from "fast-xml-parser";
 import { notInArray } from "drizzle-orm";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
-import { normalizeRecord } from "./parser.js";
+import { getByPath, normalizeRecord } from "./parser.js";
 
 type SyncResult = {
   added: number;
@@ -17,6 +18,17 @@ type SyncResult = {
 
 const isJsonByContentType = (contentType: string | null) =>
   Boolean(contentType && contentType.includes("application/json"));
+
+const isXmlByContentType = (contentType: string | null) =>
+  Boolean(contentType && contentType.includes("xml"));
+
+const normalizeValue = (value: unknown) => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : undefined;
+};
 
 const readStreamToString = async (stream: fs.ReadStream) =>
   new Promise<string>((resolve, reject) => {
@@ -30,6 +42,20 @@ const resolveFeedPath = (feedUrl: string) => {
   if (feedUrl.startsWith("file://")) {
     return fileURLToPath(feedUrl);
   }
+  if (path.isAbsolute(feedUrl)) {
+    return feedUrl;
+  }
+
+  const cwdPath = path.resolve(process.cwd(), feedUrl);
+  if (fs.existsSync(cwdPath)) {
+    return cwdPath;
+  }
+
+  const repoRootPath = path.resolve(process.cwd(), "server", feedUrl);
+  if (fs.existsSync(repoRootPath)) {
+    return repoRootPath;
+  }
+
   return feedUrl;
 };
 
@@ -54,7 +80,8 @@ async function readFeedContent(feedUrl: string) {
 }
 
 function parseFeed(text: string, contentType: string | null, sourcePath: string) {
-  const extension = path.extname(sourcePath).toLowerCase();
+  const cleanedPath = sourcePath.split("?")[0].split("#")[0];
+  const extension = path.extname(cleanedPath).toLowerCase();
   const shouldParseJson = isJsonByContentType(contentType) || extension === ".json";
 
   if (shouldParseJson) {
@@ -85,17 +112,65 @@ export async function syncOrders(): Promise<SyncResult> {
   }
 
   const { text, contentType, sourcePath } = await readFeedContent(feedUrl);
-  const records = parseFeed(text, contentType, sourcePath) as Record<string, unknown>[];
+  const cleanedPath = sourcePath.split("?")[0].split("#")[0];
+  const extension = path.extname(cleanedPath).toLowerCase();
+  const isXmlSource =
+    isXmlByContentType(contentType) || extension === ".xml" || cleanedPath.endsWith(".xml");
+  let normalizedRecords = [] as ReturnType<typeof normalizeRecord>[];
+
+  if (isXmlSource) {
+    const parser = new XMLParser({
+      ignoreAttributes: true,
+      removeNSPrefix: true,
+      trimValues: true
+    });
+    const xmlObject = parser.parse(text);
+    const recordPath = process.env.XML_RECORD_PATH;
+    const xmlRecords = getByPath(xmlObject, recordPath) as
+      | Record<string, unknown>
+      | Record<string, unknown>[]
+      | undefined;
+    const recordArray = Array.isArray(xmlRecords)
+      ? xmlRecords
+      : xmlRecords
+      ? [xmlRecords]
+      : [];
+
+    const orderIdPath = process.env.XML_FIELD_ORDER_ID;
+    const skuPath = process.env.XML_FIELD_SKU;
+    const customFieldPath = process.env.XML_FIELD_CUSTOM_FIELD;
+    const buyerNamePath = process.env.XML_FIELD_BUYER_NAME;
+
+    normalizedRecords = recordArray.map((record) => {
+      const orderId = normalizeValue(getByPath(record, orderIdPath));
+      const sku = normalizeValue(getByPath(record, skuPath));
+      const customField = normalizeValue(getByPath(record, customFieldPath));
+      const buyerName = normalizeValue(getByPath(record, buyerNamePath));
+
+      return normalizeRecord(record, {
+        orderId,
+        sku,
+        customField,
+        buyerName,
+        raw: JSON.stringify(record)
+      });
+    });
+  } else {
+    const records = parseFeed(text, contentType, sourcePath) as Record<
+      string,
+      unknown
+    >[];
+    normalizedRecords = records.map((record) => normalizeRecord(record));
+  }
 
   let added = 0;
   let duplicates = 0;
   let deleted = 0;
   let skipped = 0;
-  const totalParsed = records.length;
+  const totalParsed = normalizedRecords.length;
   const incomingOrderIds = new Set<string>();
 
-  for (const record of records) {
-    const normalized = normalizeRecord(record);
+  for (const normalized of normalizedRecords) {
     if (!normalized.orderId) {
       skipped += 1;
       continue;
@@ -110,6 +185,8 @@ export async function syncOrders(): Promise<SyncResult> {
         purchaseDate: normalized.purchaseDate ?? null,
         status: normalized.status ?? null,
         customField: normalized.customField ?? null,
+        sku: normalized.sku ?? null,
+        buyerName: normalized.buyerName ?? null,
         raw: normalized.raw
       })
       .onConflictDoNothing()
