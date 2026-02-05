@@ -9,6 +9,7 @@ import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
 import { syncOrders } from "./sync.js";
+import { generateLightBurnProject } from "./lightburn.js";
 
 const app = Fastify({ logger: true });
 
@@ -85,14 +86,41 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     return { error: "Order not found" };
   }
 
-  const outputDir = path.resolve(process.cwd(), "output");
-  const filePath = path.join(outputDir, "lightburn_data.txt");
-  await fs.mkdir(outputDir, { recursive: true });
+  // Resolve the template path
+  const templatePath = path.join(
+    process.cwd(),
+    "templates",
+    "LightBurn-Osso-Template.lbrn2"
+  );
 
-  const fileContent = `${order.orderId}, ${order.customField ?? ""}`;
-  await fs.writeFile(filePath, fileContent, "utf-8");
+  // Check if the template exists
+  try {
+    await fs.access(templatePath);
+  } catch (error) {
+    reply.code(500);
+    return {
+      error: "Template file not found",
+      templatePath,
+    };
+  }
 
-  return { filePath };
+  // Generate the LightBurn project
+  try {
+    const result = await generateLightBurnProject(order, templatePath);
+    return {
+      success: true,
+      orderId: result.orderId,
+      wslPath: result.wslPath,
+      windowsPath: result.windowsPath,
+      message: "LightBurn project generated and launched successfully",
+    };
+  } catch (error) {
+    reply.code(500);
+    return {
+      error:
+        error instanceof Error ? error.message : "Failed to generate project",
+    };
+  }
 };
 
 app.post("/orders/:orderId/lightburn", async (request, reply) => {
