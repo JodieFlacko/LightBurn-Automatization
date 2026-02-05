@@ -67,11 +67,11 @@ app.get("/orders", async (request) => {
   return { items, limit, offset };
 });
 
-app.post("/orders/:orderId/ezcad", async (request, reply) => {
-  const paramsSchema = z.object({
-    orderId: z.string().min(1)
-  });
+const paramsSchema = z.object({
+  orderId: z.string().min(1)
+});
 
+const handleLightburn = async (request: { params: unknown }, reply: any) => {
   const { orderId } = paramsSchema.parse(request.params);
   const rows = await db
     .select()
@@ -86,13 +86,22 @@ app.post("/orders/:orderId/ezcad", async (request, reply) => {
   }
 
   const outputDir = path.resolve(process.cwd(), "output");
-  const filePath = path.join(outputDir, "ezcad_data.txt");
+  const filePath = path.join(outputDir, "lightburn_data.txt");
   await fs.mkdir(outputDir, { recursive: true });
 
   const fileContent = `${order.orderId}, ${order.customField ?? ""}`;
   await fs.writeFile(filePath, fileContent, "utf-8");
 
   return { filePath };
+};
+
+app.post("/orders/:orderId/lightburn", async (request, reply) => {
+  return handleLightburn(request, reply);
+});
+
+app.post("/orders/:orderId/ezcad", async (request, reply) => {
+  const result = await handleLightburn(request, reply);
+  return { ...result, warning: "Deprecated; use /lightburn" };
 });
 
 const port = Number(process.env.PORT || 3001);

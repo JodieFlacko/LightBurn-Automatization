@@ -24,4 +24,5 @@
 - `GET /orders?limit=&offset=&search=&hasCustomField=`:
   returns paginated orders; `search` is a substring match on `orderId`.
 - `POST /sync`: fetches feed and syncs orders.
-- `POST /orders/:orderId/ezcad`: builds LightBurn/EZCAD export for an order.
+- `POST /orders/:orderId/lightburn`: builds LightBurn export for an order.
+- `POST /orders/:orderId/ezcad`: deprecated alias for `/lightburn`.

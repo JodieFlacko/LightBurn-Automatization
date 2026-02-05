@@ -67,7 +67,7 @@ export default function App() {
   };
 
   const handleLightburn = async (orderId: string) => {
-    const response = await fetch(`${API_URL}/orders/${orderId}/ezcad`, {
+    const response = await fetch(`${API_URL}/orders/${orderId}/lightburn`, {
       method: "POST"
     });
     const data = await response.json();
