@@ -39,8 +39,10 @@ export default function App() {
         : "";
       // If user is searching, ignore filter and search all history
       const statusParam = trimmedTerm ? "" : (mode === 'pending' ? '&status=pending' : '');
+      // Only show orders with customizations in "To Do" mode
+      const customFieldParam = (!trimmedTerm && mode === 'pending') ? '&hasCustomField=true' : '';
       const response = await fetch(
-        `${API_URL}/orders?limit=50&offset=0${searchParam}${statusParam}`
+        `${API_URL}/orders?limit=50&offset=0${searchParam}${statusParam}${customFieldParam}`
       );
       const data = await response.json();
       setOrders(data.items ?? []);
@@ -274,6 +276,7 @@ export default function App() {
                       order.orderId === activeSearchTerm;
                     const isPrinted = order.status === 'printed';
                     const isProcessing = processingOrders.has(order.orderId);
+                    const hasCustomField = Boolean(order.customField && order.customField.trim());
                     
                     // Row background: amber for exact match, emerald for printed, white for pending
                     const rowClassName = isExactMatch 
@@ -300,10 +303,18 @@ export default function App() {
                           {order.buyerName ?? "-"}
                         </td>
                         <td className="px-4 py-3 text-slate-600">
-                          {order.customField ?? "-"}
+                          {hasCustomField ? (
+                            order.customField
+                          ) : (
+                            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
+                              Standard Order
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
-                          {isPrinted ? (
+                          {!hasCustomField ? (
+                            <span className="text-slate-400">-</span>
+                          ) : isPrinted ? (
                             <button
                               className="rounded bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300 disabled:opacity-60"
                               onClick={() => handleLightburn(order.orderId)}
