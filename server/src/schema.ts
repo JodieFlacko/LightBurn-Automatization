@@ -14,4 +14,12 @@ export const orders = sqliteTable("orders", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
 
+export const templateRules = sqliteTable("template_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  skuPattern: text("sku_pattern").notNull(),
+  templateFilename: text("template_filename").notNull(),
+  priority: integer("priority").notNull().default(0)
+});
+
 export type Order = typeof orders.$inferSelect;
+export type TemplateRule = typeof templateRules.$inferSelect;

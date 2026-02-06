@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useDebouncedValue } from "./useDebouncedValue";
+import Settings from "./Settings";
 
 type Order = {
   id: number;
@@ -11,14 +12,17 @@ type Order = {
   status: string | null;
 };
 
+type View = "orders" | "settings";
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export default function App() {
+  const [currentView, setCurrentView] = useState<View>("orders");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState<'pending' | 'all'>('pending');
   const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
@@ -59,13 +63,13 @@ export default function App() {
         throw new Error(message);
       }
       await fetchOrders(searchTerm, filterMode);
-      setToast("Sync completed.");
+      setToast({ message: "Sync completed.", type: 'success' });
       setTimeout(() => setToast(null), 4000);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Sync failed. Check console.";
       console.error(error);
-      setToast(message);
+      setToast({ message, type: 'error' });
       setTimeout(() => setToast(null), 6000);
     } finally {
       setSyncing(false);
@@ -92,7 +96,10 @@ export default function App() {
           )
         );
         
-        setToast(`LightBurn file created at ${data.filePath || 'output directory'}`);
+        setToast({ 
+          message: `LightBurn file created at ${data.filePath || 'output directory'}`,
+          type: 'success'
+        });
         setTimeout(() => setToast(null), 4000);
         
         // Clear search and refocus input for next scan
@@ -101,12 +108,18 @@ export default function App() {
           searchInputRef.current?.focus();
         }, 100);
       } else {
-        setToast(`Error: ${data.error || 'Failed to generate file'}`);
+        setToast({ 
+          message: data.error || 'Failed to generate file',
+          type: 'error'
+        });
         setTimeout(() => setToast(null), 6000);
       }
     } catch (error) {
       console.error(error);
-      setToast("Failed to send to LightBurn");
+      setToast({ 
+        message: "Failed to send to LightBurn",
+        type: 'error'
+      });
       setTimeout(() => setToast(null), 6000);
     } finally {
       // Remove processing state
@@ -133,6 +146,12 @@ export default function App() {
       ]
     : orders;
 
+  // If on Settings view, render the Settings component
+  if (currentView === "settings") {
+    return <Settings onBack={() => setCurrentView("orders")} />;
+  }
+
+  // Otherwise render the Orders view
   return (
     <div className="min-h-screen px-6 py-10">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -143,18 +162,42 @@ export default function App() {
               Sync orders and send custom fields to LightBurn.
             </p>
           </div>
-          <button
-            className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            onClick={handleSync}
-            disabled={syncing}
-          >
-            {syncing ? "Syncing..." : "Sync Now"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded bg-slate-600 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              onClick={() => setCurrentView("settings")}
+              title="Settings"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+            <button
+              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              onClick={handleSync}
+              disabled={syncing}
+            >
+              {syncing ? "Syncing..." : "Sync Now"}
+            </button>
+          </div>
         </header>
 
         {toast && (
-          <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {toast}
+          <div className={`rounded border px-4 py-3 text-sm ${
+            toast.type === 'error'
+              ? 'border-red-200 bg-red-50 text-red-700'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          }`}>
+            {toast.message}
           </div>
         )}
 
