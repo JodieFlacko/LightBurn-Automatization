@@ -36,10 +36,11 @@ app.get("/orders", async (request) => {
     limit: z.coerce.number().int().min(1).max(100).default(50),
     offset: z.coerce.number().int().min(0).default(0),
     search: z.string().optional(),
-    hasCustomField: z.coerce.boolean().optional()
+    hasCustomField: z.coerce.boolean().optional(),
+    status: z.string().optional()
   });
 
-  const { limit, offset, search, hasCustomField } = querySchema.parse(
+  const { limit, offset, search, hasCustomField, status } = querySchema.parse(
     request.query ?? {}
   );
 
@@ -53,6 +54,17 @@ app.get("/orders", async (request) => {
     conditions.push(
       sql`${orders.customField} is not null and ${orders.customField} != ''`
     );
+  }
+
+  if (status) {
+    if (status === 'pending') {
+      // Pending means status is null, empty, or explicitly 'pending'
+      conditions.push(
+        sql`(${orders.status} is null or ${orders.status} = '' or ${orders.status} = 'pending')`
+      );
+    } else {
+      conditions.push(eq(orders.status, status));
+    }
   }
 
   const where = conditions.length ? and(...conditions) : undefined;
@@ -107,6 +119,13 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
   // Generate the LightBurn project
   try {
     const result = await generateLightBurnProject(order, templatePath);
+    
+    // Update the order status to 'printed'
+    await db
+      .update(orders)
+      .set({ status: 'printed' })
+      .where(eq(orders.orderId, orderId));
+    
     return {
       success: true,
       orderId: result.orderId,

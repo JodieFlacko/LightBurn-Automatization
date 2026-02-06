@@ -1,17 +1,5 @@
 <Orders>
   <Order>
-    <ID>XML-1</ID>
-    <SKU>LSR-MARK-01</SKU>
-    <Custom>Engrave: Alex</Custom>
-    <Buyer>Jacob Smith</Buyer>
-  </Order>
-  <Order>
-    <ID>XML-2</ID>
-    <SKU>LSR-MARK-02</SKU>
-    <Custom>Engrave: Fratm</Custom>
-    <Buyer>Fratm Smith</Buyer>
-  </Order>
-  <Order>
     <ID>XML-3</ID>
     <SKU>LSR-MARK-03</SKU>
     <Custom>Engrave: Bellissima</Custom>
@@ -30,9 +18,21 @@
     <Buyer>Diamond Smith</Buyer>
   </Order>
   <Order>
-    <ID>XML-7</ID>
+    <ID>XML-8</ID>
     <SKU>LSR-MARK-06</SKU>
     <Custom>Engrave: Ambra</Custom>
+    <Buyer>Emerald Smith</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-9</ID>
+    <SKU>LSR-MARK-07</SKU>
+    <Custom>Engrave: Emerald</Custom>
+    <Buyer>Emerald Smith</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-10</ID>
+    <SKU>LSR-MARK-08</SKU>
+    <Custom>Engrave: Emerald</Custom>
     <Buyer>Emerald Smith</Buyer>
   </Order>
 </Orders>

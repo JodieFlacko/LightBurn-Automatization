@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDebouncedValue } from "./useDebouncedValue";
 
 type Order = {
@@ -8,6 +8,7 @@ type Order = {
   sku: string | null;
   buyerName: string | null;
   customField: string | null;
+  status: string | null;
 };
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
@@ -19,9 +20,12 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterMode, setFilterMode] = useState<'pending' | 'all'>('pending');
+  const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
-  const fetchOrders = async (term: string) => {
+  const fetchOrders = async (term: string, mode: 'pending' | 'all') => {
     const trimmedTerm = term.trim();
     setLoading(true);
     setSearching(Boolean(trimmedTerm));
@@ -29,8 +33,10 @@ export default function App() {
       const searchParam = trimmedTerm
         ? `&search=${encodeURIComponent(trimmedTerm)}`
         : "";
+      // If user is searching, ignore filter and search all history
+      const statusParam = trimmedTerm ? "" : (mode === 'pending' ? '&status=pending' : '');
       const response = await fetch(
-        `${API_URL}/orders?limit=50&offset=0${searchParam}`
+        `${API_URL}/orders?limit=50&offset=0${searchParam}${statusParam}`
       );
       const data = await response.json();
       setOrders(data.items ?? []);
@@ -52,7 +58,7 @@ export default function App() {
             : `Sync failed (${response.status})`;
         throw new Error(message);
       }
-      await fetchOrders(searchTerm);
+      await fetchOrders(searchTerm, filterMode);
       setToast("Sync completed.");
       setTimeout(() => setToast(null), 4000);
     } catch (error) {
@@ -67,17 +73,54 @@ export default function App() {
   };
 
   const handleLightburn = async (orderId: string) => {
-    const response = await fetch(`${API_URL}/orders/${orderId}/lightburn`, {
-      method: "POST"
-    });
-    const data = await response.json();
-    setToast(`LightBurn file created at ${data.filePath}`);
-    setTimeout(() => setToast(null), 4000);
+    // Mark order as processing
+    setProcessingOrders(prev => new Set(prev).add(orderId));
+    
+    try {
+      const response = await fetch(`${API_URL}/orders/${orderId}/lightburn`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Optimistically update the order status in local state
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { ...order, status: 'printed' }
+              : order
+          )
+        );
+        
+        setToast(`LightBurn file created at ${data.filePath || 'output directory'}`);
+        setTimeout(() => setToast(null), 4000);
+        
+        // Clear search and refocus input for next scan
+        setSearchTerm("");
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+        }, 100);
+      } else {
+        setToast(`Error: ${data.error || 'Failed to generate file'}`);
+        setTimeout(() => setToast(null), 6000);
+      }
+    } catch (error) {
+      console.error(error);
+      setToast("Failed to send to LightBurn");
+      setTimeout(() => setToast(null), 6000);
+    } finally {
+      // Remove processing state
+      setProcessingOrders(prev => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+    }
   };
 
   useEffect(() => {
-    fetchOrders(debouncedSearchTerm);
-  }, [debouncedSearchTerm]);
+    fetchOrders(debouncedSearchTerm, filterMode);
+  }, [debouncedSearchTerm, filterMode]);
 
   const activeSearchTerm = debouncedSearchTerm.trim();
   const exactMatchOrder = activeSearchTerm
@@ -117,9 +160,31 @@ export default function App() {
 
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 text-sm font-medium text-slate-700">
-            <span>Orders</span>
+            <div className="flex items-center gap-2">
+              <button
+                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  filterMode === 'pending'
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                onClick={() => setFilterMode('pending')}
+              >
+                To Do
+              </button>
+              <button
+                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  filterMode === 'all'
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                onClick={() => setFilterMode('all')}
+              >
+                All History
+              </button>
+            </div>
             <div className="flex items-center gap-3">
               <input
+                ref={searchInputRef}
                 className="w-64 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 placeholder="Search Order ID (e.g. AMZ-1001)"
                 value={searchTerm}
@@ -164,10 +229,20 @@ export default function App() {
                     const isExactMatch =
                       activeSearchTerm.length > 0 &&
                       order.orderId === activeSearchTerm;
+                    const isPrinted = order.status === 'printed';
+                    const isProcessing = processingOrders.has(order.orderId);
+                    
+                    // Row background: amber for exact match, emerald for printed, white for pending
+                    const rowClassName = isExactMatch 
+                      ? "bg-amber-50" 
+                      : isPrinted 
+                      ? "bg-emerald-50"
+                      : undefined;
+                    
                     return (
                       <tr
                         key={order.id}
-                        className={isExactMatch ? "bg-amber-50" : undefined}
+                        className={rowClassName}
                       >
                         <td className="px-4 py-3 font-medium text-slate-700">
                           {order.orderId}
@@ -185,12 +260,23 @@ export default function App() {
                           {order.customField ?? "-"}
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                            onClick={() => handleLightburn(order.orderId)}
-                          >
-                            Send to LightBurn
-                          </button>
+                          {isPrinted ? (
+                            <button
+                              className="rounded bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300 disabled:opacity-60"
+                              onClick={() => handleLightburn(order.orderId)}
+                              disabled={isProcessing}
+                            >
+                              {isProcessing ? "Sending..." : "Reprint"}
+                            </button>
+                          ) : (
+                            <button
+                              className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                              onClick={() => handleLightburn(order.orderId)}
+                              disabled={isProcessing}
+                            >
+                              {isProcessing ? "Sending..." : "Send to LightBurn"}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
