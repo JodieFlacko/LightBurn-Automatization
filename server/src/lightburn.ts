@@ -3,8 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { exec } from "node:child_process";
 import { db } from "./db.js";
-import { templateRules } from "./schema.js";
+import { templateRules, assetRules } from "./schema.js";
 import { desc } from "drizzle-orm";
+import os from "node:os";
 
 interface Order {
   orderId: string;
@@ -17,6 +18,84 @@ interface LightBurnResult {
   wslPath: string;
   windowsPath: string;
   orderId: string;
+  detectedColor?: string;
+}
+
+interface DetectedAssets {
+  imageAsset?: string;
+  fontAsset?: string;
+  colorAsset?: string;
+}
+
+/**
+ * Detect assets based on custom field text
+ * @param customField - The custom field text to scan
+ * @returns Detected assets
+ */
+async function detectAssets(customField: string | null): Promise<DetectedAssets> {
+  console.log("\n=== Asset Detection ===");
+  console.log("Custom field:", customField);
+
+  const detected: DetectedAssets = {};
+
+  if (!customField) {
+    console.log("No custom field provided");
+    return detected;
+  }
+
+  // Get all asset rules
+  const rules = await db.select().from(assetRules).all();
+  console.log("Total asset rules:", rules.length);
+
+  // Normalize custom field for matching
+  const normalizedField = customField.toLowerCase();
+
+  for (const rule of rules) {
+    const normalizedKeyword = rule.triggerKeyword.toLowerCase();
+    if (normalizedField.includes(normalizedKeyword)) {
+      console.log(`✓ Matched keyword "${rule.triggerKeyword}" for type "${rule.assetType}"`);
+      
+      if (rule.assetType === 'image') {
+        detected.imageAsset = rule.value;
+      } else if (rule.assetType === 'font') {
+        detected.fontAsset = rule.value;
+      } else if (rule.assetType === 'color') {
+        detected.colorAsset = rule.value;
+      }
+    }
+  }
+
+  console.log("Detected assets:", detected);
+  console.log("=== End Asset Detection ===\n");
+  return detected;
+}
+
+/**
+ * Copy image to temp directory
+ * @param imageName - Name of the image file
+ * @returns Windows path to the copied image
+ */
+async function copyImageToTemp(imageName: string): Promise<string> {
+  const sourcePath = path.join(process.cwd(), "assets", imageName);
+  
+  // Determine temp directory based on OS
+  const isWindows = os.platform() === "win32";
+  const tempDir = isWindows ? "C:\\Temp\\LightBurnAuto" : "/mnt/c/Temp/LightBurnAuto";
+  
+  await fs.mkdir(tempDir, { recursive: true });
+  
+  const destPath = path.join(tempDir, imageName);
+  
+  try {
+    await fs.copyFile(sourcePath, destPath);
+    console.log(`✓ Copied image from ${sourcePath} to ${destPath}`);
+    
+    // Return Windows path format
+    return isWindows ? destPath : `C:\\Temp\\LightBurnAuto\\${imageName}`;
+  } catch (error) {
+    console.error(`✗ Failed to copy image: ${error}`);
+    throw new Error(`Failed to copy image ${imageName}`);
+  }
 }
 
 /**
@@ -149,6 +228,38 @@ export async function generateLightBurnProject(
     const buyerName = order.buyerName || "Customer";
     customerShape.attr("Str", buyerName);
 
+    // Detect assets from custom field
+    const detectedAssets = await detectAssets(order.customField);
+
+    // Handle image asset (copy and swap)
+    if (detectedAssets.imageAsset) {
+      try {
+        const windowsImagePath = await copyImageToTemp(detectedAssets.imageAsset);
+        const imageShape = $('Shape[Name="{{DESIGN_IMAGE}}"]');
+        
+        if (imageShape.length > 0) {
+          // The Magic Fix: Set File, empty Data, reset SourceHash
+          imageShape.attr("File", windowsImagePath);
+          imageShape.attr("Data", "");
+          imageShape.attr("SourceHash", "0");
+          console.log(`✓ Updated image path to: ${windowsImagePath}`);
+          console.log(`✓ Applied image injection fix: Data="", SourceHash="0"`);
+        } else {
+          console.log("⚠ Warning: No shape with Name={{DESIGN_IMAGE}} found");
+        }
+      } catch (error) {
+        console.error(`✗ Failed to process image asset: ${error}`);
+      }
+    } else {
+      console.log("ℹ No image asset matched for this order");
+    }
+
+    // Handle font asset
+    if (detectedAssets.fontAsset) {
+      customerShape.attr("Font", detectedAssets.fontAsset);
+      console.log(`✓ Updated font to: ${detectedAssets.fontAsset}`);
+    }
+
     // Prepare the output directory (WSL path)
     const outputDir = "/mnt/c/Temp/LightBurnAuto";
     await fs.mkdir(outputDir, { recursive: true });
@@ -185,6 +296,7 @@ export async function generateLightBurnProject(
       wslPath,
       windowsPath,
       orderId: order.orderId,
+      detectedColor: detectedAssets.colorAsset,
     };
   } catch (error) {
     throw new Error(

@@ -21,5 +21,13 @@ export const templateRules = sqliteTable("template_rules", {
   priority: integer("priority").notNull().default(0)
 });
 
+export const assetRules = sqliteTable("asset_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  triggerKeyword: text("trigger_keyword").notNull(),
+  assetType: text("asset_type").notNull(), // 'image', 'font', 'color'
+  value: text("value").notNull()
+});
+
 export type Order = typeof orders.$inferSelect;
 export type TemplateRule = typeof templateRules.$inferSelect;
+export type AssetRule = typeof assetRules.$inferSelect;

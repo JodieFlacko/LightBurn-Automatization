@@ -7,7 +7,7 @@ import path from "node:path";
 import { and, eq, like, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
-import { orders, templateRules } from "./schema.js";
+import { orders, templateRules, assetRules } from "./schema.js";
 import { syncOrders } from "./sync.js";
 import { generateLightBurnProject } from "./lightburn.js";
 
@@ -77,7 +77,28 @@ app.get("/orders", async (request) => {
     .offset(offset)
     .orderBy(orders.id);
 
-  return { items, limit, offset };
+  // Detect color for each order
+  const colorRules = await db
+    .select()
+    .from(assetRules)
+    .where(eq(assetRules.assetType, 'color'))
+    .all();
+
+  const itemsWithColor = items.map(order => {
+    let detectedColor = null;
+    if (order.customField) {
+      const normalizedField = order.customField.toLowerCase();
+      for (const rule of colorRules) {
+        if (normalizedField.includes(rule.triggerKeyword.toLowerCase())) {
+          detectedColor = rule.value;
+          break;
+        }
+      }
+    }
+    return { ...order, detectedColor };
+  });
+
+  return { items: itemsWithColor, limit, offset };
 });
 
 const paramsSchema = z.object({
@@ -233,6 +254,66 @@ app.delete("/settings/rules/:id", async (request, reply) => {
     await db
       .delete(templateRules)
       .where(eq(templateRules.id, id));
+    
+    return { success: true };
+  } catch (error) {
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Invalid request"
+    };
+  }
+});
+
+// Asset Rules Management Endpoints
+
+app.get("/settings/asset-rules", async () => {
+  const rules = await db
+    .select()
+    .from(assetRules)
+    .orderBy(assetRules.id)
+    .all();
+  return { rules };
+});
+
+app.post("/settings/asset-rules", async (request, reply) => {
+  const bodySchema = z.object({
+    triggerKeyword: z.string().min(1),
+    assetType: z.enum(['image', 'font', 'color']),
+    value: z.string().min(1)
+  });
+
+  try {
+    const { triggerKeyword, assetType, value } = bodySchema.parse(request.body);
+    
+    const result = await db
+      .insert(assetRules)
+      .values({
+        triggerKeyword,
+        assetType,
+        value
+      })
+      .returning();
+    
+    return { success: true, rule: result[0] };
+  } catch (error) {
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Invalid request body"
+    };
+  }
+});
+
+const deleteAssetRuleParamsSchema = z.object({
+  id: z.coerce.number().int().min(1)
+});
+
+app.delete("/settings/asset-rules/:id", async (request, reply) => {
+  try {
+    const { id } = deleteAssetRuleParamsSchema.parse(request.params);
+    
+    await db
+      .delete(assetRules)
+      .where(eq(assetRules.id, id));
     
     return { success: true };
   } catch (error) {

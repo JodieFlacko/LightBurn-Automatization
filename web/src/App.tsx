@@ -10,6 +10,7 @@ type Order = {
   buyerName: string | null;
   customField: string | null;
   status: string | null;
+  detectedColor?: string | null;
 };
 
 type View = "orders" | "settings";
@@ -251,24 +252,25 @@ export default function App() {
                   <th className="px-4 py-3">SKU</th>
                   <th className="px-4 py-3">Buyer</th>
                   <th className="px-4 py-3">Custom Field</th>
+                  <th className="px-4 py-3">Color</th>
                   <th className="px-4 py-3">LightBurn</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr>
-                    <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
-                      Loading...
-                    </td>
-                  </tr>
-                ) : displayedOrders.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
-                      {activeSearchTerm
-                        ? `No orders found for ${activeSearchTerm}.`
-                        : "No orders found."}
-                    </td>
-                  </tr>
+                      <tr>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+                          Loading...
+                        </td>
+                      </tr>
+                    ) : displayedOrders.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+                          {activeSearchTerm
+                            ? `No orders found for ${activeSearchTerm}.`
+                            : "No orders found."}
+                        </td>
+                      </tr>
                 ) : (
                   displayedOrders.map((order) => {
                     const isExactMatch =
@@ -309,6 +311,19 @@ export default function App() {
                             <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
                               Standard Order
                             </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {order.detectedColor ? (
+                            <div className="flex items-center gap-2">
+                              <div 
+                                className="h-6 w-6 rounded-full border-2 border-slate-300"
+                                style={{ backgroundColor: order.detectedColor }}
+                                title={order.detectedColor}
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
                           )}
                         </td>
                         <td className="px-4 py-3">

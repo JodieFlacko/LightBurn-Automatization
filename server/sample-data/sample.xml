@@ -34,4 +34,16 @@
     <SKU>LSR-MARK-08</SKU>
     <Buyer>Jesus Smith</Buyer>
   </Order>
+  <Order>
+    <ID>XML-14</ID>
+    <SKU>LSR-MARK-09</SKU>
+    <Custom>Engrave: Jade, Design: Heart, Color: White</Custom>
+    <Buyer>Peppe Smith</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-15</ID>
+    <SKU>LSR-MARK-10</SKU>
+    <Custom>Engrave: Fratm, Design: Zampa, Color: Black</Custom>
+    <Buyer>Peppe OK</Buyer>
+  </Order>
 </Orders>
