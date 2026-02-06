@@ -7,6 +7,7 @@ import { notInArray } from "drizzle-orm";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
 import { getByPath, normalizeRecord } from "./parser.js";
+import { logger, logError } from "./logger.js";
 
 type SyncResult = {
   added: number;
@@ -108,10 +109,15 @@ function parseFeed(text: string, contentType: string | null, sourcePath: string)
 export async function syncOrders(): Promise<SyncResult> {
   const feedUrl = process.env.FEED_URL;
   if (!feedUrl) {
-    throw new Error("FEED_URL is not set in .env");
+    const error = new Error("FEED_URL is not set in .env");
+    logError(error, { operation: "sync_orders" });
+    throw error;
   }
 
+  logger.info({ feedUrl }, "Starting order synchronization");
+
   const { text, contentType, sourcePath } = await readFeedContent(feedUrl);
+  logger.info({ sourcePath, contentType }, "Feed content loaded successfully");
   const cleanedPath = sourcePath.split("?")[0].split("#")[0];
   const extension = path.extname(cleanedPath).toLowerCase();
   const isXmlSource =
@@ -207,13 +213,36 @@ export async function syncOrders(): Promise<SyncResult> {
       .run();
 
     deleted = deleteResult.changes;
+    
+    if (deleted > 0) {
+      logger.info({ deleted }, "Removed orders no longer in feed");
+    }
   }
 
   if (totalParsed > 0 && added + skipped + duplicates === 0) {
-    throw new Error(
+    const error = new Error(
       "Sync completed with zero added/skipped records. Mapping likely failed."
     );
+    logError(error, { 
+      totalParsed, 
+      added, 
+      skipped, 
+      duplicates,
+      operation: "sync_orders" 
+    });
+    throw error;
   }
+
+  logger.info(
+    { 
+      added, 
+      duplicates, 
+      deleted, 
+      skipped, 
+      totalParsed 
+    },
+    "Order synchronization completed"
+  );
 
   return { added, duplicates, deleted, skipped, totalParsed };
 }

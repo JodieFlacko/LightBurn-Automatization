@@ -6,6 +6,7 @@ import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
 import { desc } from "drizzle-orm";
 import os from "node:os";
+import { logger, logError } from "./logger.js";
 
 interface Order {
   orderId: string;
@@ -57,19 +58,18 @@ function extractEngravingName(customField: string | null): string {
  * @returns Detected assets
  */
 async function detectAssets(customField: string | null): Promise<DetectedAssets> {
-  console.log("\n=== Asset Detection ===");
-  console.log("Custom field:", customField);
+  logger.debug({ customField }, "Starting asset detection");
 
   const detected: DetectedAssets = {};
 
   if (!customField) {
-    console.log("No custom field provided");
+    logger.debug("No custom field provided, skipping asset detection");
     return detected;
   }
 
   // Get all asset rules
   const rules = await db.select().from(assetRules).all();
-  console.log("Total asset rules:", rules.length);
+  logger.debug({ ruleCount: rules.length }, "Loaded asset rules");
 
   // Normalize custom field for matching
   const normalizedField = customField.toLowerCase();
@@ -77,7 +77,14 @@ async function detectAssets(customField: string | null): Promise<DetectedAssets>
   for (const rule of rules) {
     const normalizedKeyword = rule.triggerKeyword.toLowerCase();
     if (normalizedField.includes(normalizedKeyword)) {
-      console.log(`✓ Matched keyword "${rule.triggerKeyword}" for type "${rule.assetType}"`);
+      logger.info(
+        { 
+          keyword: rule.triggerKeyword, 
+          assetType: rule.assetType, 
+          value: rule.value 
+        },
+        "Asset rule matched"
+      );
       
       if (rule.assetType === 'image') {
         detected.imageAsset = rule.value;
@@ -89,8 +96,7 @@ async function detectAssets(customField: string | null): Promise<DetectedAssets>
     }
   }
 
-  console.log("Detected assets:", detected);
-  console.log("=== End Asset Detection ===\n");
+  logger.info({ detected }, "Asset detection completed");
   return detected;
 }
 
@@ -112,12 +118,12 @@ async function copyImageToTemp(imageName: string): Promise<string> {
   
   try {
     await fs.copyFile(sourcePath, destPath);
-    console.log(`✓ Copied image from ${sourcePath} to ${destPath}`);
+    logger.info({ imageName, sourcePath, destPath }, "Image copied to temp directory");
     
     // Return Windows path format
     return isWindows ? destPath : `C:\\Temp\\LightBurnAuto\\${imageName}`;
   } catch (error) {
-    console.error(`✗ Failed to copy image: ${error}`);
+    logError(error, { imageName, sourcePath, operation: "copy_image" });
     throw new Error(`Failed to copy image ${imageName}`);
   }
 }
@@ -128,11 +134,10 @@ async function copyImageToTemp(imageName: string): Promise<string> {
  * @returns The template filename or null if no match
  */
 async function findTemplateForSku(sku: string | null): Promise<string | null> {
-  console.log("\n=== SKU Template Matching ===");
-  console.log("Incoming SKU:", sku);
+  logger.info({ sku }, "Starting SKU template matching");
   
   if (!sku) {
-    console.log("No SKU provided, returning null");
+    logger.warn("No SKU provided, returning null");
     return null;
   }
 
@@ -143,11 +148,10 @@ async function findTemplateForSku(sku: string | null): Promise<string | null> {
     .orderBy(desc(templateRules.priority))
     .all();
 
-  console.log("Total rules fetched from DB:", rules.length);
-  console.log("Rules:", JSON.stringify(rules, null, 2));
+  logger.debug({ ruleCount: rules.length }, "Template rules loaded");
 
   if (rules.length === 0) {
-    console.log("No rules configured in database");
+    logger.warn("No template rules configured in database");
     return null;
   }
 
@@ -159,29 +163,28 @@ async function findTemplateForSku(sku: string | null): Promise<string | null> {
     return b.skuPattern.length - a.skuPattern.length; // Longer pattern first
   });
 
-  console.log("Rules after sorting by priority/length:", 
-    sortedRules.map(r => ({ pattern: r.skuPattern, priority: r.priority }))
-  );
-
   // Normalize SKU for case-insensitive matching
   const normalizedSku = sku.toLowerCase();
-  console.log("Normalized SKU for matching:", normalizedSku);
 
   // Find the first rule where the SKU contains the pattern (case-insensitive)
   for (const rule of sortedRules) {
     const normalizedPattern = rule.skuPattern.toLowerCase();
-    console.log(`Checking pattern "${rule.skuPattern}" (normalized: "${normalizedPattern}") against SKU`);
     
     if (normalizedSku.includes(normalizedPattern)) {
-      console.log(`✓ MATCH FOUND! Pattern "${rule.skuPattern}" matches SKU "${sku}"`);
-      console.log(`  → Using template: ${rule.templateFilename}`);
+      logger.info(
+        { 
+          sku, 
+          pattern: rule.skuPattern, 
+          templateFilename: rule.templateFilename,
+          priority: rule.priority
+        },
+        "Template match found"
+      );
       return rule.templateFilename;
-    } else {
-      console.log(`  ✗ No match (SKU doesn't contain pattern)`);
     }
   }
 
-  console.log("No matching rule found, will use default template");
+  logger.warn({ sku }, "No matching template rule found");
   return null;
 }
 
@@ -196,44 +199,44 @@ export async function generateLightBurnProject(
   defaultTemplatePath: string
 ): Promise<LightBurnResult> {
   try {
-    console.log("\n=== Template Selection for Order ===");
-    console.log("Order ID:", order.orderId);
-    console.log("Order SKU:", order.sku);
-    console.log("Default template path:", defaultTemplatePath);
+    logger.info(
+      { 
+        orderId: order.orderId, 
+        sku: order.sku, 
+        buyerName: order.buyerName 
+      },
+      "Starting LightBurn project generation"
+    );
     
     const matchedTemplate = await findTemplateForSku(order.sku);
     
     if (!matchedTemplate) {
-      console.error("✗ NO TEMPLATE MATCH: No rule configured for this SKU");
-      console.log("=== End Template Selection ===\n");
-      throw new Error(`NO_TEMPLATE_MATCH: No template rule found for SKU: ${order.sku || "(null)"}`);
+      const error = new Error(`NO_TEMPLATE_MATCH: No template rule found for SKU: ${order.sku || "(null)"}`);
+      logError(error, { orderId: order.orderId, sku: order.sku });
+      throw error;
     }
 
-    console.log(`\nMatched template filename: "${matchedTemplate}"`);
+    logger.info({ matchedTemplate }, "Template matched for SKU");
     
     // Construct the full path to the matched template
     const templatesDir = path.dirname(defaultTemplatePath);
     const templatePath = path.join(templatesDir, matchedTemplate);
     
-    console.log("Templates directory:", templatesDir);
-    console.log("Full path to matched template:", templatePath);
-    
     // Check if the template file exists
     try {
       await fs.access(templatePath);
-      console.log("✓ Template file exists, using it");
+      logger.info({ templatePath }, "Template file found");
     } catch (error) {
-      console.error(
-        `✗ Template file "${matchedTemplate}" not found at path: ${templatePath}`
-      );
-      console.error("Error details:", error instanceof Error ? error.message : error);
-      throw new Error(
+      const notFoundError = new Error(
         `TEMPLATE_FILE_NOT_FOUND: Template file "${matchedTemplate}" not found at path: ${templatePath}`
       );
+      logError(notFoundError, { 
+        orderId: order.orderId, 
+        matchedTemplate, 
+        templatePath 
+      });
+      throw notFoundError;
     }
-
-    console.log("Final template path being used:", templatePath);
-    console.log("=== End Template Selection ===\n");
 
     // Read the template file
     const templateContent = await fs.readFile(templatePath, "utf-8");
@@ -250,7 +253,7 @@ export async function generateLightBurnProject(
 
     // Extract the engraving name from the custom field
     const engravingName = extractEngravingName(order.customField);
-    console.log(`Extracted engraving name: "${engravingName}"`);
+    logger.info({ engravingName, orderId: order.orderId }, "Extracted engraving name");
     customerShape.attr("Str", engravingName);
 
     // Detect assets from custom field
@@ -267,22 +270,27 @@ export async function generateLightBurnProject(
           imageShape.attr("File", windowsImagePath);
           imageShape.attr("Data", "");
           imageShape.attr("SourceHash", "0");
-          console.log(`✓ Updated image path to: ${windowsImagePath}`);
-          console.log(`✓ Applied image injection fix: Data="", SourceHash="0"`);
+          logger.info(
+            { windowsImagePath, orderId: order.orderId },
+            "Image injected with Magic Fix (Data='', SourceHash='0')"
+          );
         } else {
-          console.log("⚠ Warning: No shape with Name={{DESIGN_IMAGE}} found");
+          logger.warn({ orderId: order.orderId }, "No {{DESIGN_IMAGE}} shape found in template");
         }
       } catch (error) {
-        console.error(`✗ Failed to process image asset: ${error}`);
+        logError(error, { orderId: order.orderId, imageAsset: detectedAssets.imageAsset });
       }
     } else {
-      console.log("ℹ No image asset matched for this order");
+      logger.debug({ orderId: order.orderId }, "No image asset detected");
     }
 
     // Handle font asset
     if (detectedAssets.fontAsset) {
       customerShape.attr("Font", detectedAssets.fontAsset);
-      console.log(`✓ Updated font to: ${detectedAssets.fontAsset}`);
+      logger.info(
+        { font: detectedAssets.fontAsset, orderId: order.orderId },
+        "Font applied to text shape"
+      );
     }
 
     // Prepare the output directory (WSL path)
@@ -296,6 +304,7 @@ export async function generateLightBurnProject(
     // Save the modified XML
     const modifiedContent = $.xml();
     await fs.writeFile(wslPath, modifiedContent, "utf-8");
+    logger.info({ wslPath, orderId: order.orderId }, "LightBurn file written");
 
     // Convert WSL path to Windows path
     // /mnt/c/Temp/LightBurnAuto -> C:\Temp\LightBurnAuto
@@ -308,7 +317,11 @@ export async function generateLightBurnProject(
 
     const childProcess = exec(command, (error) => {
       if (error) {
-        console.error(`Error launching LightBurn: ${error.message}`);
+        logError(error, { 
+          orderId: order.orderId, 
+          windowsPath, 
+          operation: "launch_lightburn" 
+        });
       }
     });
 
@@ -317,6 +330,15 @@ export async function generateLightBurnProject(
       childProcess.unref();
     }
 
+    logger.info(
+      { 
+        orderId: order.orderId, 
+        windowsPath,
+        detectedColor: detectedAssets.colorAsset
+      },
+      "LightBurn launched successfully"
+    );
+
     return {
       wslPath,
       windowsPath,
@@ -324,6 +346,7 @@ export async function generateLightBurnProject(
       detectedColor: detectedAssets.colorAsset,
     };
   } catch (error) {
+    logError(error, { orderId: order.orderId, operation: "generate_lightburn_project" });
     throw new Error(
       `Failed to generate LightBurn project: ${
         error instanceof Error ? error.message : "Unknown error"
