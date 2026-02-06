@@ -28,6 +28,30 @@ interface DetectedAssets {
 }
 
 /**
+ * Extract the engraving name from custom field text
+ * Looks for "Engrave:" or "Name:" keywords and extracts the following text
+ * @param customField - The custom field text to parse
+ * @returns The extracted name, or empty string if not found
+ */
+function extractEngravingName(customField: string | null): string {
+  if (!customField) {
+    return "";
+  }
+
+  // Look for "Engrave:" or "Name:" (case-insensitive)
+  const regex = /(?:Engrave|Name)\s*:\s*([^,]+)/i;
+  const match = customField.match(regex);
+  
+  if (match && match[1]) {
+    // Extract and trim the captured group
+    return match[1].trim();
+  }
+  
+  // If no match found, return empty string
+  return "";
+}
+
+/**
  * Detect assets based on custom field text
  * @param customField - The custom field text to scan
  * @returns Detected assets
@@ -224,9 +248,10 @@ export async function generateLightBurnProject(
       throw new Error('Template does not contain a Shape with Name="{{CUSTOMER_NAME}}"');
     }
 
-    // Update the Str attribute with the buyer's name (or use a default if null)
-    const buyerName = order.buyerName || "Customer";
-    customerShape.attr("Str", buyerName);
+    // Extract the engraving name from the custom field
+    const engravingName = extractEngravingName(order.customField);
+    console.log(`Extracted engraving name: "${engravingName}"`);
+    customerShape.attr("Str", engravingName);
 
     // Detect assets from custom field
     const detectedAssets = await detectAssets(order.customField);

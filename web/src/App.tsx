@@ -248,9 +248,7 @@ export default function App() {
               <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Order ID</th>
-                  <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Buyer</th>
                   <th className="px-4 py-3">Custom Field</th>
                   <th className="px-4 py-3">Color</th>
                   <th className="px-4 py-3">LightBurn</th>
@@ -259,19 +257,19 @@ export default function App() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={5}>
                           Loading...
                         </td>
                       </tr>
                     ) : displayedOrders.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={5}>
                           {activeSearchTerm
                             ? `No orders found for ${activeSearchTerm}.`
                             : "No orders found."}
                         </td>
                       </tr>
-                ) : (
+                    ) : (
                   displayedOrders.map((order) => {
                     const isExactMatch =
                       activeSearchTerm.length > 0 &&
@@ -280,11 +278,11 @@ export default function App() {
                     const isProcessing = processingOrders.has(order.orderId);
                     const hasCustomField = Boolean(order.customField && order.customField.trim());
                     
-                    // Row background: amber for exact match, emerald for printed, white for pending
+                    // Row background: amber for exact match, dim for printed, white for pending
                     const rowClassName = isExactMatch 
                       ? "bg-amber-50" 
                       : isPrinted 
-                      ? "bg-emerald-50"
+                      ? "bg-slate-50 opacity-50"
                       : undefined;
                     
                     return (
@@ -296,13 +294,7 @@ export default function App() {
                           {order.orderId}
                         </td>
                         <td className="px-4 py-3 text-slate-600">
-                          {order.purchaseDate ?? "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
                           {order.sku ?? "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {order.buyerName ?? "-"}
                         </td>
                         <td className="px-4 py-3 text-slate-600">
                           {hasCustomField ? (
