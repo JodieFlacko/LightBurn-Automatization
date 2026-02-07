@@ -24,3 +24,6 @@ server/public/
 # SQLite files
 *.sqlite
 *.sqlite-*
+
+# Cursor  
+.cursor/
