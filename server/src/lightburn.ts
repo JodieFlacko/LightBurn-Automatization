@@ -2,11 +2,14 @@ import * as cheerio from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
 import { desc } from "drizzle-orm";
 import os from "node:os";
 import { logger, logError } from "./logger.js";
+
+const execPromise = promisify(exec);
 
 interface Order {
   orderId: string;
@@ -26,6 +29,173 @@ interface DetectedAssets {
   imageAsset?: string;
   fontAsset?: string;
   colorAsset?: string;
+}
+
+/**
+ * Execute LightBurn command with retry logic and exponential backoff
+ * @param command - The command to execute
+ * @param maxRetries - Maximum number of retry attempts (default 2)
+ * @returns Promise resolving to the execution result
+ */
+async function executeLightBurnWithRetry(
+  command: string,
+  maxRetries: number = 2
+): Promise<{ stdout: string; stderr: string }> {
+  const timeout = 10000; // 10 seconds per attempt
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      logger.info(
+        { attempt, maxRetries: maxRetries + 1, timeout },
+        "Attempting to execute LightBurn command"
+      );
+
+      const result = await execPromise(command, { timeout });
+
+      logger.info(
+        { attempt, stdout: result.stdout, stderr: result.stderr },
+        "LightBurn command executed successfully"
+      );
+
+      return result;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check for specific error types
+      if (lastError.message.includes("ENOENT")) {
+        const notFoundError = new Error(
+          "LIGHTBURN_NOT_FOUND: LightBurn.exe not found at expected path. Please verify LightBurn is installed at C:\\Program Files\\LightBurn\\LightBurn.exe"
+        );
+        logError(notFoundError, { attempt, originalError: lastError.message });
+        throw notFoundError;
+      }
+
+      if (lastError.message.includes("timeout") || lastError.message.includes("ETIMEDOUT")) {
+        logger.warn(
+          { attempt, maxRetries: maxRetries + 1, timeout },
+          "LightBurn command timed out"
+        );
+
+        if (attempt <= maxRetries) {
+          const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
+          logger.info({ attempt, delay }, `Retrying after ${delay}ms delay`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        const timeoutError = new Error(
+          `LIGHTBURN_TIMEOUT: LightBurn took too long to respond after ${maxRetries + 1} attempts`
+        );
+        logError(timeoutError, { attempts: maxRetries + 1, timeout });
+        throw timeoutError;
+      }
+
+      // For other errors, retry with exponential backoff
+      logger.warn(
+        { attempt, maxRetries: maxRetries + 1, error: lastError.message },
+        "LightBurn command failed"
+      );
+
+      if (attempt <= maxRetries) {
+        const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
+        logger.info({ attempt, delay }, `Retrying after ${delay}ms delay`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        logError(lastError, { totalAttempts: maxRetries + 1, operation: "execute_lightburn" });
+        throw lastError;
+      }
+    }
+  }
+
+  // This should never be reached, but TypeScript requires it
+  throw lastError || new Error("Failed to execute LightBurn command after all retries");
+}
+
+/**
+ * Verify that the generated LightBurn file exists and is valid
+ * @param wslPath - The WSL path to the generated file
+ * @param orderId - The order ID for logging purposes
+ * @returns Promise resolving when verification succeeds
+ */
+async function verifyLightBurnFile(wslPath: string, orderId: string): Promise<void> {
+  logger.info({ wslPath, orderId }, "Starting file verification");
+
+  // Wait for file system to flush
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  try {
+    // Check if file exists
+    await fs.access(wslPath);
+    logger.debug({ wslPath }, "File exists, checking size");
+
+    // Check file size
+    const stats = await fs.stat(wslPath);
+    const fileSizeBytes = stats.size;
+
+    logger.info(
+      { wslPath, fileSizeBytes, orderId },
+      "File verification: size check"
+    );
+
+    if (fileSizeBytes <= 1024) {
+      const error = new Error(
+        `LIGHTBURN_FILE_VERIFICATION_FAILED: Generated file at ${wslPath} is too small (${fileSizeBytes} bytes). Valid .lbrn2 files should be larger than 1024 bytes.`
+      );
+      logError(error, { wslPath, fileSizeBytes, orderId });
+      throw error;
+    }
+
+    logger.info(
+      { wslPath, fileSizeBytes, orderId },
+      "File verification passed"
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("LIGHTBURN_FILE_VERIFICATION_FAILED")) {
+      throw error;
+    }
+
+    // File doesn't exist or other access error
+    const verificationError = new Error(
+      `LIGHTBURN_FILE_VERIFICATION_FAILED: Failed to verify generated file at ${wslPath}. ${
+        error instanceof Error ? error.message : "File may not exist"
+      }`
+    );
+    logError(verificationError, { wslPath, orderId, originalError: error });
+    throw verificationError;
+  }
+}
+
+/**
+ * Clean up temporary files that were copied during processing
+ * Used to remove orphaned temp files when generation fails
+ * @param files - Array of file paths to delete
+ */
+async function cleanupTempFiles(files: string[]): Promise<void> {
+  if (files.length === 0) {
+    logger.debug("No temporary files to clean up");
+    return;
+  }
+
+  logger.info({ fileCount: files.length }, "Starting cleanup of temporary files");
+
+  for (const filePath of files) {
+    try {
+      await fs.unlink(filePath);
+      logger.info({ filePath }, "Successfully deleted temporary file");
+    } catch (error) {
+      // Don't throw - just log the failure and continue
+      logger.warn(
+        { 
+          filePath, 
+          error: error instanceof Error ? error.message : String(error) 
+        },
+        "Failed to delete temporary file during cleanup"
+      );
+    }
+  }
+
+  logger.info({ fileCount: files.length }, "Temporary file cleanup completed");
 }
 
 /**
@@ -198,6 +368,11 @@ export async function generateLightBurnProject(
   order: Order,
   defaultTemplatePath: string
 ): Promise<LightBurnResult> {
+  // Track copied image files for cleanup in case of failure
+  // NOTE: We keep these files on SUCCESS because LightBurn needs them while the project is open
+  // We only clean up on FAILURE to avoid orphaned files in the temp directory
+  const copiedFiles: string[] = [];
+
   try {
     logger.info(
       { 
@@ -263,6 +438,13 @@ export async function generateLightBurnProject(
     if (detectedAssets.imageAsset) {
       try {
         const windowsImagePath = await copyImageToTemp(detectedAssets.imageAsset);
+        
+        // Track the copied file for cleanup in case of later failure
+        // Convert Windows path to WSL path for deletion
+        const wslImagePath = windowsImagePath.replace(/^C:\\/, '/mnt/c/').replace(/\\/g, '/');
+        copiedFiles.push(wslImagePath);
+        logger.debug({ wslImagePath }, "Tracking copied image file for potential cleanup");
+        
         const imageShape = $('Shape[Name="{{DESIGN_IMAGE}}"]');
         
         if (imageShape.length > 0) {
@@ -310,25 +492,34 @@ export async function generateLightBurnProject(
     // /mnt/c/Temp/LightBurnAuto -> C:\Temp\LightBurnAuto
     const windowsPath = `C:\\Temp\\LightBurnAuto\\${filename}`;
 
-    // Launch LightBurn on Windows
-    // Using { detached: true } and unref() to prevent blocking the Node server
+    // Launch LightBurn on Windows with retry logic
     const lightBurnPath = 'C:\\Program Files\\LightBurn\\LightBurn.exe';
     const command = `cmd.exe /C start "" "${lightBurnPath}" "${windowsPath}"`;
 
-    const childProcess = exec(command, (error) => {
-      if (error) {
-        logError(error, { 
-          orderId: order.orderId, 
-          windowsPath, 
-          operation: "launch_lightburn" 
-        });
-      }
-    });
+    logger.info(
+      { orderId: order.orderId, windowsPath, lightBurnPath },
+      "Launching LightBurn with retry logic"
+    );
 
-    // Detach the child process so it doesn't block the Node server
-    if (childProcess) {
-      childProcess.unref();
+    try {
+      await executeLightBurnWithRetry(command, 2);
+
+      logger.info(
+        { orderId: order.orderId, windowsPath },
+        "LightBurn command executed successfully"
+      );
+    } catch (error) {
+      logError(error, {
+        orderId: order.orderId,
+        windowsPath,
+        operation: "launch_lightburn"
+      });
+      throw error;
     }
+
+    // Verify the generated file exists and is valid
+    logger.info({ orderId: order.orderId, wslPath }, "Verifying generated file");
+    await verifyLightBurnFile(wslPath, order.orderId);
 
     logger.info(
       { 
@@ -336,7 +527,14 @@ export async function generateLightBurnProject(
         windowsPath,
         detectedColor: detectedAssets.colorAsset
       },
-      "LightBurn launched successfully"
+      "LightBurn launched and file verified successfully"
+    );
+
+    // SUCCESS: Do NOT clean up copied files - LightBurn needs them while the project is open
+    // The user will work with the .lbrn2 file which references these images
+    logger.debug(
+      { orderId: order.orderId, copiedFileCount: copiedFiles.length },
+      "Generation succeeded - keeping temp files for LightBurn to use"
     );
 
     return {
@@ -347,6 +545,43 @@ export async function generateLightBurnProject(
     };
   } catch (error) {
     logError(error, { orderId: order.orderId, operation: "generate_lightburn_project" });
+    
+    // FAILURE: Clean up any temporary files that were copied before the error occurred
+    // This prevents orphaned image files from accumulating in the temp directory
+    if (copiedFiles.length > 0) {
+      logger.info(
+        { orderId: order.orderId, copiedFileCount: copiedFiles.length },
+        "Generation failed - cleaning up temporary files"
+      );
+      
+      try {
+        await cleanupTempFiles(copiedFiles);
+      } catch (cleanupError) {
+        // Log cleanup errors but don't let them mask the original error
+        logger.warn(
+          { 
+            orderId: order.orderId, 
+            cleanupError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) 
+          },
+          "Error during temporary file cleanup after generation failure"
+        );
+      }
+    }
+    
+    // Re-throw specific error types without wrapping to preserve error codes
+    if (error instanceof Error) {
+      if (
+        error.message.includes("LIGHTBURN_NOT_FOUND") ||
+        error.message.includes("LIGHTBURN_TIMEOUT") ||
+        error.message.includes("LIGHTBURN_FILE_VERIFICATION_FAILED") ||
+        error.message.includes("NO_TEMPLATE_MATCH") ||
+        error.message.includes("TEMPLATE_FILE_NOT_FOUND")
+      ) {
+        throw error;
+      }
+    }
+    
+    // Wrap generic errors with context
     throw new Error(
       `Failed to generate LightBurn project: ${
         error instanceof Error ? error.message : "Unknown error"

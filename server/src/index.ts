@@ -88,7 +88,7 @@ app.get("/orders", async (request) => {
     offset: z.coerce.number().int().min(0).default(0),
     search: z.string().optional(),
     hasCustomField: z.coerce.boolean().optional(),
-    status: z.string().optional()
+    status: z.enum(["pending", "processing", "printed", "error"]).optional()
   });
 
   const { limit, offset, search, hasCustomField, status } = querySchema.parse(
@@ -108,14 +108,8 @@ app.get("/orders", async (request) => {
   }
 
   if (status) {
-    if (status === 'pending') {
-      // Pending means status is null, empty, or explicitly 'pending'
-      conditions.push(
-        sql`(${orders.status} is null or ${orders.status} = '' or ${orders.status} = 'pending')`
-      );
-    } else {
-      conditions.push(eq(orders.status, status));
-    }
+    // With the new enum-based status, filter by exact match
+    conditions.push(eq(orders.status, status));
   }
 
   const where = conditions.length ? and(...conditions) : undefined;
@@ -160,6 +154,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
   const { orderId } = paramsSchema.parse(request.params);
   logger.info({ orderId }, "LightBurn generation requested");
   
+  // Fetch the order from database
   const rows = await db
     .select()
     .from(orders)
@@ -179,33 +174,108 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
       orderId: order.orderId,
       sku: order.sku,
       buyerName: order.buyerName,
-      status: order.status
+      status: order.status,
+      attemptCount: order.attemptCount
     },
-    "Order found, proceeding with LightBurn generation"
+    "Order found, validating status"
+  );
+
+  // ==================== PHASE 1: PRE-FLIGHT VALIDATION ====================
+  
+  // Check if order is already being processed
+  if (order.status === 'processing') {
+    logger.warn(
+      { orderId, status: order.status },
+      "Order is already being processed by another operator"
+    );
+    reply.code(409); // Conflict
+    return {
+      error: "Order is already being processed by another operator. Please wait or refresh to see the latest status.",
+      status: order.status,
+      attemptCount: order.attemptCount
+    };
+  }
+
+  // Check if order was already printed (allow retry with warning)
+  if (order.status === 'printed') {
+    logger.warn(
+      { orderId, status: order.status, processedAt: order.processedAt },
+      "Order was already printed, allowing retry"
+    );
+    // Continue processing but we'll return a warning in the response
+  }
+
+  // ==================== PHASE 2: SET PROCESSING STATE ====================
+  
+  logger.info(
+    { orderId, previousStatus: order.status, newAttemptCount: order.attemptCount + 1 },
+    "Setting order status to 'processing' and incrementing attempt count"
+  );
+
+  // Update to 'processing' and increment attemptCount to lock the order
+  const updateResult = db
+    .update(orders)
+    .set({
+      status: 'processing',
+      attemptCount: order.attemptCount + 1,
+      errorMessage: null, // Clear previous error message
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    })
+    .where(eq(orders.orderId, orderId))
+    .run();
+
+  if (updateResult.changes === 0) {
+    logger.error({ orderId }, "Failed to update order status to 'processing'");
+    reply.code(500);
+    return { error: "Failed to lock order for processing" };
+  }
+
+  const currentAttemptCount = order.attemptCount + 1;
+  logger.info(
+    { orderId, status: 'processing', attemptCount: currentAttemptCount },
+    "Order locked for processing"
   );
 
   // Resolve the templates directory
-  // The actual template file is selected dynamically based on SKU matching rules
   const templatesDir = path.join(process.cwd(), "templates");
   const defaultTemplatePath = path.join(templatesDir, "targhetta-osso-fronte.lbrn2");
 
-  // Generate the LightBurn project
+  // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
+  
   try {
-    const result = await generateLightBurnProject(order, defaultTemplatePath);
+    logger.info({ orderId, templatePath: defaultTemplatePath }, "Starting LightBurn project generation");
     
-    // Update the order status to 'printed'
-    await db
-      .update(orders)
-      .set({ status: 'printed' })
-      .where(eq(orders.orderId, orderId));
+    const result = await generateLightBurnProject(order, defaultTemplatePath);
     
     logger.info(
       { 
         orderId: result.orderId, 
+        wslPath: result.wslPath,
         windowsPath: result.windowsPath 
       },
-      "LightBurn project generated and launched successfully"
+      "LightBurn project generated successfully"
     );
+    
+    // Update the order status to 'printed' with timestamp
+    const finalUpdateResult = db
+      .update(orders)
+      .set({ 
+        status: 'printed',
+        processedAt: sql`CURRENT_TIMESTAMP`,
+        errorMessage: null,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      })
+      .where(eq(orders.orderId, orderId))
+      .run();
+
+    if (finalUpdateResult.changes === 0) {
+      logger.error({ orderId }, "Failed to update order status to 'printed' after successful generation");
+    } else {
+      logger.info(
+        { orderId, status: 'printed', attemptCount: currentAttemptCount },
+        "Order status updated to 'printed'"
+      );
+    }
     
     return {
       success: true,
@@ -213,32 +283,103 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
       wslPath: result.wslPath,
       windowsPath: result.windowsPath,
       message: "LightBurn project generated and launched successfully",
+      warning: order.status === 'printed' ? "This order was already marked as printed. Reprocessed successfully." : undefined
     };
+    
   } catch (error) {
+    // ==================== PHASE 4: ERROR HANDLING WITH SMART RETRY ====================
+    
     const errorMessage = error instanceof Error ? error.message : "Failed to generate project";
     
-    // Check for specific error types
+    logger.error(
+      { 
+        orderId, 
+        sku: order.sku, 
+        attemptCount: currentAttemptCount,
+        errorMessage 
+      },
+      "LightBurn generation failed"
+    );
+
+    // Determine if we should allow retry based on attempt count
+    const shouldRetry = currentAttemptCount < 3;
+    const finalStatus = shouldRetry ? 'pending' : 'error';
+
+    logger.info(
+      { 
+        orderId, 
+        attemptCount: currentAttemptCount, 
+        shouldRetry, 
+        finalStatus 
+      },
+      shouldRetry 
+        ? "Setting status back to 'pending' for automatic retry" 
+        : "Maximum attempts reached, setting status to 'error'"
+    );
+
+    // Update order with error details and appropriate status
+    const errorUpdateResult = db
+      .update(orders)
+      .set({ 
+        status: finalStatus,
+        errorMessage: errorMessage,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      })
+      .where(eq(orders.orderId, orderId))
+      .run();
+
+    if (errorUpdateResult.changes === 0) {
+      logger.error({ orderId }, "Failed to update order with error status");
+    } else {
+      logger.info(
+        { orderId, status: finalStatus, errorMessage },
+        "Order status updated after error"
+      );
+    }
+    
+    // Determine error type and response code
+    let errorType = 'UNKNOWN';
+    let statusCode = 500;
+    let userMessage = errorMessage;
+
     if (errorMessage.includes("NO_TEMPLATE_MATCH")) {
-      logError(error, { orderId, sku: order.sku, errorType: "NO_TEMPLATE_MATCH" });
-      reply.code(400);
-      return {
-        error: `Configuration Required: No template found for SKU '${order.sku || "(none)"}'. Please add a rule in Settings.`,
-      };
+      errorType = 'NO_TEMPLATE_MATCH';
+      statusCode = 400;
+      userMessage = `Configuration Required: No template found for SKU '${order.sku || "(none)"}'. Please add a rule in Settings.`;
+      logError(error, { orderId, sku: order.sku, errorType, attemptCount: currentAttemptCount });
+    } else if (errorMessage.includes("TEMPLATE_FILE_NOT_FOUND")) {
+      errorType = 'TEMPLATE_FILE_NOT_FOUND';
+      statusCode = 500;
+      userMessage = errorMessage.replace("TEMPLATE_FILE_NOT_FOUND: ", "");
+      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
+    } else if (errorMessage.includes("LIGHTBURN_NOT_FOUND")) {
+      errorType = 'LIGHTBURN_NOT_FOUND';
+      statusCode = 500;
+      userMessage = errorMessage.replace("LIGHTBURN_NOT_FOUND: ", "");
+      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
+    } else if (errorMessage.includes("LIGHTBURN_TIMEOUT")) {
+      errorType = 'LIGHTBURN_TIMEOUT';
+      statusCode = 500;
+      userMessage = errorMessage.replace("LIGHTBURN_TIMEOUT: ", "");
+      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
+    } else if (errorMessage.includes("LIGHTBURN_FILE_VERIFICATION_FAILED")) {
+      errorType = 'LIGHTBURN_FILE_VERIFICATION_FAILED';
+      statusCode = 500;
+      userMessage = errorMessage.replace("LIGHTBURN_FILE_VERIFICATION_FAILED: ", "");
+      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
+    } else {
+      errorType = 'GENERATION_FAILED';
+      logError(error, { orderId, sku: order.sku, errorType, attemptCount: currentAttemptCount, operation: "lightburn_generation" });
     }
     
-    if (errorMessage.includes("TEMPLATE_FILE_NOT_FOUND")) {
-      logError(error, { orderId, errorType: "TEMPLATE_FILE_NOT_FOUND" });
-      reply.code(500);
-      return {
-        error: errorMessage.replace("TEMPLATE_FILE_NOT_FOUND: ", ""),
-      };
-    }
-    
-    // Generic error
-    logError(error, { orderId, sku: order.sku, operation: "lightburn_generation" });
-    reply.code(500);
+    reply.code(statusCode);
     return {
-      error: errorMessage,
+      error: userMessage,
+      errorType,
+      status: finalStatus,
+      attemptCount: currentAttemptCount,
+      retriesRemaining: shouldRetry ? 3 - currentAttemptCount : 0,
+      retryable: shouldRetry
     };
   }
 };

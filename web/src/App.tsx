@@ -9,8 +9,11 @@ type Order = {
   sku: string | null;
   buyerName: string | null;
   customField: string | null;
-  status: string | null;
+  status: 'pending' | 'processing' | 'printed' | 'error';
   detectedColor?: string | null;
+  errorMessage?: string | null;
+  processedAt?: string | null;
+  attemptCount?: number;
 };
 
 type View = "orders" | "settings";
@@ -19,6 +22,128 @@ type View = "orders" | "settings";
 // In development, use explicit localhost URL
 const API_URL = import.meta.env.VITE_API_URL || 
   (import.meta.env.PROD ? "" : "http://localhost:3001");
+
+// Status Badge Component
+function StatusBadge({ 
+  order, 
+  onErrorClick 
+}: { 
+  order: Order; 
+  onErrorClick?: () => void;
+}) {
+  if (order.status === 'pending') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+        <span className="h-2 w-2 rounded-full bg-slate-400"></span>
+        Pending
+      </span>
+    );
+  }
+
+  if (order.status === 'processing') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+        <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+        Processing...
+      </span>
+    );
+  }
+
+  if (order.status === 'printed') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+        </svg>
+        Printed
+      </span>
+    );
+  }
+
+  if (order.status === 'error') {
+    return (
+      <button
+        onClick={onErrorClick}
+        className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-200"
+        title="Click to see error details"
+      >
+        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
+        Failed
+      </button>
+    );
+  }
+
+  return null;
+}
+
+// Error Details Modal Component
+function ErrorDetailsModal({ 
+  order, 
+  onClose,
+  onRetry
+}: { 
+  order: Order; 
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
+      <div className="max-w-md rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <svg className="h-5 w-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <h3 className="text-lg font-semibold text-slate-900">Error Details</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-medium text-slate-700">Order ID</p>
+            <p className="text-sm text-slate-600">{order.orderId}</p>
+          </div>
+          
+          <div>
+            <p className="text-sm font-medium text-slate-700">Error Message</p>
+            <p className="text-sm text-red-700 bg-red-50 rounded px-3 py-2 border border-red-200">
+              {order.errorMessage || "Unknown error occurred"}
+            </p>
+          </div>
+          
+          <div>
+            <p className="text-sm font-medium text-slate-700">Attempts</p>
+            <p className="text-sm text-slate-600">
+              Failed after {order.attemptCount || 0} attempt{(order.attemptCount || 0) !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+        
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onRetry}
+            className="flex-1 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Retry Order
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>("orders");
@@ -30,6 +155,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState<'pending' | 'all'>('pending');
   const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
+  const [errorModalOrder, setErrorModalOrder] = useState<Order | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
@@ -83,8 +209,17 @@ export default function App() {
   };
 
   const handleLightburn = async (orderId: string) => {
-    // Mark order as processing
+    // Mark order as processing in local state for UI feedback
     setProcessingOrders(prev => new Set(prev).add(orderId));
+    
+    // Optimistically update status to 'processing'
+    setOrders(prevOrders => 
+      prevOrders.map(order => 
+        order.orderId === orderId 
+          ? { ...order, status: 'processing' as const }
+          : order
+      )
+    );
     
     try {
       const response = await fetch(`${API_URL}/orders/${orderId}/lightburn`, {
@@ -93,17 +228,18 @@ export default function App() {
       const data = await response.json();
       
       if (response.ok) {
-        // Optimistically update the order status in local state
+        // Update to 'printed' status on success
         setOrders(prevOrders => 
           prevOrders.map(order => 
             order.orderId === orderId 
-              ? { ...order, status: 'printed' }
+              ? { ...order, status: 'printed' as const, errorMessage: null }
               : order
           )
         );
         
+        const warningMsg = data.warning ? ` (${data.warning})` : '';
         setToast({ 
-          message: `LightBurn file created at ${data.filePath || 'output directory'}`,
+          message: `LightBurn file created successfully${warningMsg}`,
           type: 'success'
         });
         setTimeout(() => setToast(null), 4000);
@@ -114,6 +250,20 @@ export default function App() {
           searchInputRef.current?.focus();
         }, 100);
       } else {
+        // Update to 'error' status on failure
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { 
+                  ...order, 
+                  status: data.status || 'error' as const,
+                  errorMessage: data.error || 'Failed to generate file',
+                  attemptCount: data.attemptCount
+                }
+              : order
+          )
+        );
+        
         setToast({ 
           message: data.error || 'Failed to generate file',
           type: 'error'
@@ -122,8 +272,18 @@ export default function App() {
       }
     } catch (error) {
       console.error(error);
+      
+      // Update to 'error' status on network failure
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order.orderId === orderId 
+            ? { ...order, status: 'error' as const, errorMessage: 'Network error: Failed to send to LightBurn' }
+            : order
+        )
+      );
+      
       setToast({ 
-        message: "Failed to send to LightBurn",
+        message: "Network error: Failed to send to LightBurn",
         type: 'error'
       });
       setTimeout(() => setToast(null), 6000);
@@ -254,19 +414,20 @@ export default function App() {
                   <th className="px-4 py-3">SKU</th>
                   <th className="px-4 py-3">Custom Field</th>
                   <th className="px-4 py-3">Color</th>
-                  <th className="px-4 py-3">LightBurn</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={5}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
                           Loading...
                         </td>
                       </tr>
                     ) : displayedOrders.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={5}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
                           {activeSearchTerm
                             ? `No orders found for ${activeSearchTerm}.`
                             : "No orders found."}
@@ -277,16 +438,73 @@ export default function App() {
                     const isExactMatch =
                       activeSearchTerm.length > 0 &&
                       order.orderId === activeSearchTerm;
+                    const isProcessing = order.status === 'processing';
                     const isPrinted = order.status === 'printed';
-                    const isProcessing = processingOrders.has(order.orderId);
+                    const isError = order.status === 'error';
                     const hasCustomField = Boolean(order.customField && order.customField.trim());
                     
                     // Row background: amber for exact match, dim for printed, white for pending
                     const rowClassName = isExactMatch 
-                      ? "bg-amber-50" 
+                      ? "bg-amber-50 transition-colors duration-200" 
                       : isPrinted 
-                      ? "bg-slate-50 opacity-50"
-                      : undefined;
+                      ? "bg-slate-50 opacity-50 transition-opacity duration-200"
+                      : "transition-colors duration-200";
+                    
+                    // Determine button appearance based on status
+                    const getActionButton = () => {
+                      if (!hasCustomField) {
+                        return <span className="text-slate-400">-</span>;
+                      }
+
+                      // Disable button when processing
+                      if (isProcessing) {
+                        return (
+                          <button
+                            className="rounded bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 cursor-not-allowed opacity-60"
+                            disabled
+                            title="Order is being processed"
+                          >
+                            Processing...
+                          </button>
+                        );
+                      }
+
+                      // Error state - show Retry button
+                      if (isError) {
+                        return (
+                          <button
+                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                            onClick={() => handleLightburn(order.orderId)}
+                            title="Retry failed order"
+                          >
+                            Retry
+                          </button>
+                        );
+                      }
+
+                      // Printed state - show Resend button with warning color
+                      if (isPrinted) {
+                        return (
+                          <button
+                            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+                            onClick={() => handleLightburn(order.orderId)}
+                            title="Order already printed - resend if needed"
+                          >
+                            Resend
+                          </button>
+                        );
+                      }
+
+                      // Pending state - show primary button
+                      return (
+                        <button
+                          className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+                          onClick={() => handleLightburn(order.orderId)}
+                        >
+                          Send to LightBurn
+                        </button>
+                      );
+                    };
                     
                     return (
                       <tr
@@ -322,25 +540,13 @@ export default function App() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {!hasCustomField ? (
-                            <span className="text-slate-400">-</span>
-                          ) : isPrinted ? (
-                            <button
-                              className="rounded bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300 disabled:opacity-60"
-                              onClick={() => handleLightburn(order.orderId)}
-                              disabled={isProcessing}
-                            >
-                              {isProcessing ? "Sending..." : "Reprint"}
-                            </button>
-                          ) : (
-                            <button
-                              className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-                              onClick={() => handleLightburn(order.orderId)}
-                              disabled={isProcessing}
-                            >
-                              {isProcessing ? "Sending..." : "Send to LightBurn"}
-                            </button>
-                          )}
+                          <StatusBadge 
+                            order={order} 
+                            onErrorClick={() => setErrorModalOrder(order)}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          {getActionButton()}
                         </td>
                       </tr>
                     );
@@ -351,6 +557,18 @@ export default function App() {
           </div>
         </section>
       </div>
+
+      {/* Error Details Modal */}
+      {errorModalOrder && (
+        <ErrorDetailsModal
+          order={errorModalOrder}
+          onClose={() => setErrorModalOrder(null)}
+          onRetry={() => {
+            handleLightburn(errorModalOrder.orderId);
+            setErrorModalOrder(null);
+          }}
+        />
+      )}
     </div>
   );
 }

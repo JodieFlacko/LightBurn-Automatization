@@ -189,7 +189,7 @@ export async function syncOrders(): Promise<SyncResult> {
       .values({
         orderId: normalized.orderId,
         purchaseDate: normalized.purchaseDate ?? null,
-        status: normalized.status ?? null,
+        status: "pending",
         customField: normalized.customField ?? null,
         sku: normalized.sku ?? null,
         buyerName: normalized.buyerName ?? null,

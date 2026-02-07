@@ -5,11 +5,14 @@ export const orders = sqliteTable("orders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   orderId: text("order_id").notNull().unique(),
   purchaseDate: text("purchase_date"),
-  status: text("status"),
+  status: text("status", { enum: ["pending", "processing", "printed", "error"] }).notNull().default("pending"),
   customField: text("custom_field"),
   sku: text("sku"),
   buyerName: text("buyer_name"),
   raw: text("raw").notNull(),
+  errorMessage: text("error_message"),
+  processedAt: text("processed_at"),
+  attemptCount: integer("attempt_count").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
