@@ -13,6 +13,19 @@ export const orders = sqliteTable("orders", {
   errorMessage: text("error_message"),
   processedAt: text("processed_at"),
   attemptCount: integer("attempt_count").notNull().default(0),
+  
+  // Front side (fronte) tracking
+  fronteStatus: text("fronte_status", { enum: ["pending", "processing", "printed", "error"] }).notNull().default("pending"),
+  fronteErrorMessage: text("fronte_error_message"),
+  fronteAttemptCount: integer("fronte_attempt_count").notNull().default(0),
+  fronteProcessedAt: text("fronte_processed_at"),
+  
+  // Back side (retro) tracking
+  retroStatus: text("retro_status", { enum: ["not_required", "pending", "processing", "printed", "error"] }).notNull().default("not_required"),
+  retroErrorMessage: text("retro_error_message"),
+  retroAttemptCount: integer("retro_attempt_count").notNull().default(0),
+  retroProcessedAt: text("retro_processed_at"),
+  
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });

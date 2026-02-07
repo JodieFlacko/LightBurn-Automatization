@@ -14,6 +14,16 @@ type Order = {
   errorMessage?: string | null;
   processedAt?: string | null;
   attemptCount?: number;
+  // Front side fields
+  fronteStatus: 'pending' | 'processing' | 'printed' | 'error';
+  fronteErrorMessage?: string | null;
+  fronteAttemptCount?: number;
+  fronteProcessedAt?: string | null;
+  // Retro side fields
+  retroStatus: 'not_required' | 'pending' | 'processing' | 'printed' | 'error';
+  retroErrorMessage?: string | null;
+  retroAttemptCount?: number;
+  retroProcessedAt?: string | null;
 };
 
 type View = "orders" | "settings";
@@ -28,15 +38,25 @@ type ViewState = {
 const API_URL = import.meta.env.VITE_API_URL || 
   (import.meta.env.PROD ? "" : "http://localhost:3001");
 
-// Status Badge Component
-function StatusBadge({ 
-  order, 
+// Side-specific Status Badge Component
+function SideStatusBadge({ 
+  status,
+  errorMessage,
   onErrorClick 
 }: { 
-  order: Order; 
+  status: 'not_required' | 'pending' | 'processing' | 'printed' | 'error';
+  errorMessage?: string | null;
   onErrorClick?: () => void;
 }) {
-  if (order.status === 'pending') {
+  if (status === 'not_required') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+        N/A
+      </span>
+    );
+  }
+
+  if (status === 'pending') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
         <span className="h-2 w-2 rounded-full bg-slate-400"></span>
@@ -45,7 +65,7 @@ function StatusBadge({
     );
   }
 
-  if (order.status === 'processing') {
+  if (status === 'processing') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
         <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
@@ -54,7 +74,7 @@ function StatusBadge({
     );
   }
 
-  if (order.status === 'printed') {
+  if (status === 'printed') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
         <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -65,9 +85,9 @@ function StatusBadge({
     );
   }
 
-  if (order.status === 'error') {
+  if (status === 'error') {
     // Check if this is a configuration error
-    const isConfigError = order.errorMessage?.startsWith('CONFIG_ERROR:');
+    const isConfigError = errorMessage?.startsWith('CONFIG_ERROR:');
     
     if (isConfigError) {
       return (
@@ -99,6 +119,17 @@ function StatusBadge({
   }
 
   return null;
+}
+
+// Legacy Status Badge Component (for overall status)
+function StatusBadge({ 
+  order, 
+  onErrorClick 
+}: { 
+  order: Order; 
+  onErrorClick?: () => void;
+}) {
+  return <SideStatusBadge status={order.status as any} errorMessage={order.errorMessage} onErrorClick={onErrorClick} />;
 }
 
 // Error Details Modal Component
@@ -261,14 +292,18 @@ export default function App() {
   const [filterMode, setFilterMode] = useState<'pending' | 'all'>('pending');
   const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
   const [retryingOrders, setRetryingOrders] = useState<Set<string>>(new Set());
+  const [processingFronteOrders, setProcessingFronteOrders] = useState<Set<string>>(new Set());
+  const [processingRetroOrders, setProcessingRetroOrders] = useState<Set<string>>(new Set());
   const [errorModalOrder, setErrorModalOrder] = useState<Order | null>(null);
+  const [errorModalSide, setErrorModalSide] = useState<'front' | 'retro' | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
-  // Find configuration errors for banner
+  // Find configuration errors for banner (check both front and retro)
   const configErrorOrders = orders.filter(o => 
-    o.status === 'error' && o.errorMessage?.startsWith('CONFIG_ERROR:')
+    (o.fronteStatus === 'error' && o.fronteErrorMessage?.startsWith('CONFIG_ERROR:')) ||
+    (o.retroStatus === 'error' && o.retroErrorMessage?.startsWith('CONFIG_ERROR:'))
   );
   
   // Show banner if there are config errors and it hasn't been dismissed
@@ -325,6 +360,109 @@ export default function App() {
       setTimeout(() => setToast(null), 6000);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSideProcessing = async (orderId: string, side: 'front' | 'retro') => {
+    const sideLabel = side === 'front' ? 'fronte' : 'retro';
+    const statusField = side === 'front' ? 'fronteStatus' : 'retroStatus';
+    const errorField = side === 'front' ? 'fronteErrorMessage' : 'retroErrorMessage';
+    const attemptField = side === 'front' ? 'fronteAttemptCount' : 'retroAttemptCount';
+    const setProcessingSide = side === 'front' ? setProcessingFronteOrders : setProcessingRetroOrders;
+    
+    console.log(`handle${side}Processing called for order:`, orderId);
+    
+    // Mark order side as processing in local state for UI feedback
+    setProcessingSide(prev => new Set(prev).add(orderId));
+    
+    // Optimistically update status to 'processing'
+    setOrders(prevOrders => 
+      prevOrders.map(order => 
+        order.orderId === orderId 
+          ? { ...order, [statusField]: 'processing' as const }
+          : order
+      )
+    );
+    
+    try {
+      const response = await fetch(`${API_URL}/orders/${orderId}/lightburn/${sideLabel}`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      
+      console.log(`${sideLabel} processing response:`, { ok: response.ok, status: response.status, data });
+      
+      if (response.ok) {
+        // Update to 'printed' status on success
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { ...order, [statusField]: 'printed' as const, [errorField]: null }
+              : order
+          )
+        );
+        
+        const warningMsg = data.warning ? ` (${data.warning})` : '';
+        setToast({ 
+          message: `${side === 'front' ? 'Front' : 'Retro'} side processed successfully${warningMsg}`,
+          type: 'success'
+        });
+        setTimeout(() => setToast(null), 4000);
+        
+        // Clear search and refocus input for next scan
+        setSearchTerm("");
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+        }, 100);
+      } else {
+        // Update to 'error' status on failure
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { 
+                  ...order, 
+                  [statusField]: data.status || 'error' as const,
+                  [errorField]: data.error || 'Failed to generate file',
+                  [attemptField]: data.attemptCount
+                }
+              : order
+          )
+        );
+        
+        setToast({ 
+          message: `${side === 'front' ? 'Front' : 'Retro'}: ${data.error || 'Failed to generate file'}`,
+          type: 'error'
+        });
+        setTimeout(() => setToast(null), 6000);
+      }
+    } catch (error) {
+      console.error(`${sideLabel} processing request failed:`, error);
+      
+      // Update to 'error' status on network failure
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order.orderId === orderId 
+            ? { ...order, [statusField]: 'error' as const, [errorField]: 'Network error: Failed to send to LightBurn' }
+            : order
+        )
+      );
+      
+      setToast({ 
+        message: `Network error: Failed to send ${side} side to LightBurn`,
+        type: 'error'
+      });
+      setTimeout(() => setToast(null), 6000);
+    } finally {
+      // Remove processing state
+      setProcessingSide(prev => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+      
+      // ALWAYS refresh orders after request completes to ensure UI shows server state
+      console.log(`Refreshing orders after ${sideLabel} operation...`);
+      await fetchOrders(searchTerm, filterMode);
     }
   };
 
@@ -593,18 +731,27 @@ export default function App() {
                   Configuration Required
                 </h3>
                 {configErrorOrders.map((order) => {
-                  const errorMsg = order.errorMessage?.replace('CONFIG_ERROR: ', '') || '';
-                  const skuMatch = errorMsg.match(/SKU[:\s]+['"]([^'"]+)['"]/i);
-                  const sku = skuMatch ? skuMatch[1] : order.sku;
+                  const fronteHasError = order.fronteStatus === 'error' && order.fronteErrorMessage?.startsWith('CONFIG_ERROR:');
+                  const retroHasError = order.retroStatus === 'error' && order.retroErrorMessage?.startsWith('CONFIG_ERROR:');
                   
                   return (
                     <div key={order.id} className="text-sm text-orange-800 mb-2">
-                      <strong>Order {order.orderId}</strong>: No template found for SKU '<span className="font-mono">{sku}</span>'.{' '}
+                      <strong>Order {order.orderId}</strong>:{' '}
+                      {fronteHasError && (
+                        <>
+                          <span className="font-medium">Front:</span> {order.fronteErrorMessage?.replace('CONFIG_ERROR: ', '')}.{' '}
+                        </>
+                      )}
+                      {retroHasError && (
+                        <>
+                          <span className="font-medium">Retro:</span> {order.retroErrorMessage?.replace('CONFIG_ERROR: ', '')}.{' '}
+                        </>
+                      )}
                       <button
                         onClick={() => handleFixConfig(order)}
                         className="underline hover:text-orange-900 font-medium"
                       >
-                        Click here to add a template rule in Settings
+                        Click here to add template rule in Settings
                       </button>
                     </div>
                   );
@@ -671,19 +818,20 @@ export default function App() {
                   <th className="px-4 py-3">Custom Field</th>
                   <th className="px-4 py-3">Color</th>
                   <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Action</th>
+                  <th className="px-4 py-3">Action Fronte</th>
+                  <th className="px-4 py-3">Action Retro</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
                           Loading...
                         </td>
                       </tr>
                     ) : displayedOrders.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={6}>
+                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
                           {activeSearchTerm
                             ? `No orders found for ${activeSearchTerm}.`
                             : "No orders found."}
@@ -699,26 +847,41 @@ export default function App() {
                     const isError = order.status === 'error';
                     const hasCustomField = Boolean(order.customField && order.customField.trim());
                     
-                    // Row background: amber for exact match, dim for printed, white for pending
+                    // Row background: amber for exact match, dim for both sides printed, white for pending
+                    const bothSidesPrinted = order.fronteStatus === 'printed' && 
+                      (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
                     const rowClassName = isExactMatch 
                       ? "bg-amber-50 transition-colors duration-200" 
-                      : isPrinted 
+                      : bothSidesPrinted
                       ? "bg-slate-50 opacity-50 transition-opacity duration-200"
                       : "transition-colors duration-200";
                     
-                    // Determine button appearance based on status
-                    const getActionButton = () => {
+                    // Determine button appearance based on side status
+                    const getSideActionButton = (
+                      side: 'front' | 'retro',
+                      sideStatus: 'pending' | 'processing' | 'printed' | 'error' | 'not_required',
+                      sideErrorMessage: string | null | undefined,
+                      sideAttemptCount: number | undefined
+                    ) => {
+                      // Retro not required - show N/A
+                      if (side === 'retro' && sideStatus === 'not_required') {
+                        return <span className="text-slate-400">N/A</span>;
+                      }
+
                       if (!hasCustomField) {
                         return <span className="text-slate-400">-</span>;
                       }
 
-                      // Disable button when processing
-                      if (isProcessing) {
+                      const processingSet = side === 'front' ? processingFronteOrders : processingRetroOrders;
+                      const isProcessingSide = processingSet.has(order.orderId);
+
+                      // Disable button when processing this side
+                      if (sideStatus === 'processing' || isProcessingSide) {
                         return (
                           <button
                             className="rounded bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 cursor-not-allowed opacity-60"
                             disabled
-                            title="Order is being processed"
+                            title={`${side === 'front' ? 'Front' : 'Retro'} side is being processed`}
                           >
                             Processing...
                           </button>
@@ -726,51 +889,45 @@ export default function App() {
                       }
 
                       // Error state - check if it's a configuration error
-                      if (isError) {
-                        const isConfigError = order.errorMessage?.startsWith('CONFIG_ERROR:');
-                        const isRetrying = retryingOrders.has(order.orderId);
+                      if (sideStatus === 'error') {
+                        const isConfigError = sideErrorMessage?.startsWith('CONFIG_ERROR:');
                         
                         if (isConfigError) {
                           return (
-                            <div className="flex gap-1.5">
-                              <button
-                                className="rounded bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 transition-colors"
-                                onClick={() => handleFixConfig(order)}
-                                title="Open Settings to add template rule"
-                              >
-                                Fix Config
-                              </button>
-                              <button
-                                className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                onClick={() => handleRetry(order.orderId)}
-                                disabled={isRetrying}
-                                title={isRetrying ? "Resetting order..." : "Reset order to retry after fixing config"}
-                              >
-                                {isRetrying ? "Resetting..." : "Reset & Retry"}
-                              </button>
-                            </div>
+                            <button
+                              className="rounded bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 transition-colors"
+                              onClick={() => {
+                                setErrorModalOrder(order);
+                                setErrorModalSide(side);
+                              }}
+                              title="Configuration error - click for details"
+                            >
+                              Fix Config
+                            </button>
                           );
                         }
                         
                         return (
                           <button
-                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                            onClick={() => handleRetry(order.orderId)}
-                            disabled={isRetrying}
-                            title={isRetrying ? "Retrying order..." : "Reset and retry failed order"}
+                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                            onClick={() => {
+                              setErrorModalOrder(order);
+                              setErrorModalSide(side);
+                            }}
+                            title="Error - click to retry"
                           >
-                            {isRetrying ? "Retrying..." : "Retry"}
+                            Retry
                           </button>
                         );
                       }
 
                       // Printed state - show Resend button with warning color
-                      if (isPrinted) {
+                      if (sideStatus === 'printed') {
                         return (
                           <button
                             className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
-                            onClick={() => handleLightburn(order.orderId)}
-                            title="Order already printed - resend if needed"
+                            onClick={() => handleSideProcessing(order.orderId, side)}
+                            title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
                           >
                             Resend
                           </button>
@@ -781,7 +938,8 @@ export default function App() {
                       return (
                         <button
                           className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
-                          onClick={() => handleLightburn(order.orderId)}
+                          onClick={() => handleSideProcessing(order.orderId, side)}
+                          title={`Process ${side === 'front' ? 'front' : 'retro'} side`}
                         >
                           Send to LightBurn
                         </button>
@@ -822,13 +980,30 @@ export default function App() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <StatusBadge 
-                            order={order} 
-                            onErrorClick={() => setErrorModalOrder(order)}
-                          />
+                          <div className="flex flex-col gap-1">
+                            <SideStatusBadge 
+                              status={order.fronteStatus}
+                              errorMessage={order.fronteErrorMessage}
+                              onErrorClick={() => {
+                                setErrorModalOrder(order);
+                                setErrorModalSide('front');
+                              }}
+                            />
+                            <SideStatusBadge 
+                              status={order.retroStatus}
+                              errorMessage={order.retroErrorMessage}
+                              onErrorClick={() => {
+                                setErrorModalOrder(order);
+                                setErrorModalSide('retro');
+                              }}
+                            />
+                          </div>
                         </td>
                         <td className="px-4 py-3">
-                          {getActionButton()}
+                          {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount)}
                         </td>
                       </tr>
                     );
@@ -841,18 +1016,30 @@ export default function App() {
       </div>
 
       {/* Error Details Modal */}
-      {errorModalOrder && (
+      {errorModalOrder && errorModalSide && (
         <ErrorDetailsModal
-          order={errorModalOrder}
-          onClose={() => setErrorModalOrder(null)}
-          onRetry={() => {
-            handleRetry(errorModalOrder.orderId);
+          order={{
+            ...errorModalOrder,
+            errorMessage: errorModalSide === 'front' 
+              ? errorModalOrder.fronteErrorMessage 
+              : errorModalOrder.retroErrorMessage,
+            attemptCount: errorModalSide === 'front'
+              ? errorModalOrder.fronteAttemptCount
+              : errorModalOrder.retroAttemptCount
+          }}
+          onClose={() => {
             setErrorModalOrder(null);
+            setErrorModalSide(null);
+          }}
+          onRetry={() => {
+            handleSideProcessing(errorModalOrder.orderId, errorModalSide);
+            setErrorModalOrder(null);
+            setErrorModalSide(null);
           }}
           onFixConfig={() => {
             handleFixConfig(errorModalOrder);
           }}
-          isRetrying={retryingOrders.has(errorModalOrder.orderId)}
+          isRetrying={false}
         />
       )}
     </div>

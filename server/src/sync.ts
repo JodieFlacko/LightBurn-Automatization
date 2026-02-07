@@ -3,11 +3,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
-import { notInArray } from "drizzle-orm";
+import { notInArray, eq, sql } from "drizzle-orm";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
 import { getByPath, normalizeRecord } from "./parser.js";
 import { logger, logError } from "./logger.js";
+import { hasRetroTemplate } from "./lightburn.js";
 
 type SyncResult = {
   added: number;
@@ -231,6 +232,41 @@ export async function syncOrders(): Promise<SyncResult> {
       operation: "sync_orders" 
     });
     throw error;
+  }
+
+  // Update retroStatus for orders based on retro template availability
+  if (added > 0 || duplicates > 0) {
+    logger.info("Checking retro template availability for orders");
+    
+    // Get all orders that have retroStatus='not_required' to check if retro templates exist
+    const allOrders = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.retroStatus, 'not_required'))
+      .all();
+    
+    let retroUpdated = 0;
+    for (const order of allOrders) {
+      const hasRetro = await hasRetroTemplate(order.sku);
+      
+      if (hasRetro) {
+        // Update retroStatus to 'pending' if retro template exists
+        await db
+          .update(orders)
+          .set({
+            retroStatus: 'pending',
+            updatedAt: sql`CURRENT_TIMESTAMP`
+          })
+          .where(eq(orders.orderId, order.orderId))
+          .run();
+        
+        retroUpdated++;
+      }
+    }
+    
+    if (retroUpdated > 0) {
+      logger.info({ retroUpdated }, "Updated retroStatus for orders with retro templates");
+    }
   }
 
   logger.info(

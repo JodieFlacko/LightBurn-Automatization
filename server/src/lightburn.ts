@@ -299,12 +299,13 @@ async function copyImageToTemp(imageName: string): Promise<string> {
 }
 
 /**
- * Find the best matching template for a given SKU
+ * Find the best matching template for a given SKU and side
  * @param sku - The product SKU to match
+ * @param side - The side to match ('front' or 'retro')
  * @returns The template filename or null if no match
  */
-async function findTemplateForSku(sku: string | null): Promise<string | null> {
-  logger.info({ sku }, "Starting SKU template matching");
+async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 'front'): Promise<string | null> {
+  logger.info({ sku, side }, "Starting SKU template matching");
   
   if (!sku) {
     logger.warn("No SKU provided, returning null");
@@ -335,38 +336,82 @@ async function findTemplateForSku(sku: string | null): Promise<string | null> {
 
   // Normalize SKU for case-insensitive matching
   const normalizedSku = sku.toLowerCase();
+  
+  // Determine template suffix based on side
+  const sideSuffix = side === 'retro' ? '-retro.lbrn2' : '-fronte.lbrn2';
+  const fallbackSuffix = '.lbrn2'; // For backward compatibility with templates without side suffix
 
   // Find the first rule where the SKU contains the pattern (case-insensitive)
   for (const rule of sortedRules) {
     const normalizedPattern = rule.skuPattern.toLowerCase();
     
     if (normalizedSku.includes(normalizedPattern)) {
-      logger.info(
-        { 
-          sku, 
-          pattern: rule.skuPattern, 
-          templateFilename: rule.templateFilename,
-          priority: rule.priority
-        },
-        "Template match found"
-      );
-      return rule.templateFilename;
+      const templateName = rule.templateFilename.toLowerCase();
+      
+      // Check if template matches the requested side
+      if (side === 'retro') {
+        // For retro, only match templates with -retro suffix
+        if (templateName.endsWith('-retro.lbrn2')) {
+          logger.info(
+            { 
+              sku, 
+              pattern: rule.skuPattern, 
+              templateFilename: rule.templateFilename,
+              priority: rule.priority,
+              side
+            },
+            "Template match found for retro side"
+          );
+          return rule.templateFilename;
+        }
+      } else {
+        // For front, match templates with -fronte suffix or no suffix (backward compatibility)
+        if (templateName.endsWith('-fronte.lbrn2') || (!templateName.endsWith('-retro.lbrn2') && templateName.endsWith('.lbrn2'))) {
+          logger.info(
+            { 
+              sku, 
+              pattern: rule.skuPattern, 
+              templateFilename: rule.templateFilename,
+              priority: rule.priority,
+              side
+            },
+            "Template match found for front side"
+          );
+          return rule.templateFilename;
+        }
+      }
     }
   }
 
-  logger.warn({ sku }, "No matching template rule found");
+  logger.warn({ sku, side }, "No matching template rule found");
   return null;
+}
+
+/**
+ * Check if a retro template exists for a given SKU
+ * @param sku - The product SKU to check
+ * @returns True if a retro template exists, false otherwise
+ */
+export async function hasRetroTemplate(sku: string | null): Promise<boolean> {
+  if (!sku) {
+    return false;
+  }
+  
+  const retroTemplate = await findTemplateForSku(sku, 'retro');
+  return retroTemplate !== null;
 }
 
 /**
  * Generate a LightBurn project file from a template by injecting order data
  * @param order - The order data containing buyer information
  * @param defaultTemplatePath - Path to the default LightBurn template file
+ * @param side - The side to process ('front' or 'retro')
  * @returns Promise with the generated file paths
  */
 export async function generateLightBurnProject(
   order: Order,
-  defaultTemplatePath: string
+  defaultTemplatePath: string,
+  side: 'front' | 'retro' = 'front'
 ): Promise<LightBurnResult> {
   // Track copied image files for cleanup in case of failure
   // NOTE: We keep these files on SUCCESS because LightBurn needs them while the project is open
@@ -378,20 +423,21 @@ export async function generateLightBurnProject(
       { 
         orderId: order.orderId, 
         sku: order.sku, 
-        buyerName: order.buyerName 
+        buyerName: order.buyerName,
+        side
       },
       "Starting LightBurn project generation"
     );
     
-    const matchedTemplate = await findTemplateForSku(order.sku);
+    const matchedTemplate = await findTemplateForSku(order.sku, side);
     
     if (!matchedTemplate) {
-      const error = new Error("NO_TEMPLATE_MATCH: No template found for SKU '" + (order.sku || "(none)") + "'");
-      logError(error, { orderId: order.orderId, sku: order.sku });
+      const error = new Error(`NO_TEMPLATE_MATCH: No ${side} template found for SKU '${order.sku || "(none)"}'`);
+      logError(error, { orderId: order.orderId, sku: order.sku, side });
       throw error;
     }
 
-    logger.info({ matchedTemplate }, "Template matched for SKU");
+    logger.info({ matchedTemplate, side }, "Template matched for SKU");
     
     // Construct the full path to the matched template
     const templatesDir = path.dirname(defaultTemplatePath);
@@ -479,8 +525,9 @@ export async function generateLightBurnProject(
     const outputDir = "/mnt/c/Temp/LightBurnAuto";
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Generate the output filename
-    const filename = `Order_${order.orderId}.lbrn2`;
+    // Generate the output filename with side indicator
+    const sideLabel = side === 'retro' ? 'retro' : 'fronte';
+    const filename = `Order_${order.orderId}_${sideLabel}.lbrn2`;
     const wslPath = path.join(outputDir, filename);
 
     // Save the modified XML

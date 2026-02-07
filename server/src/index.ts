@@ -8,9 +8,9 @@ import path from "node:path";
 import { and, eq, like, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
-import { orders, templateRules, assetRules } from "./schema.js";
+import { orders, templateRules, assetRules, Order } from "./schema.js";
 import { syncOrders } from "./sync.js";
-import { generateLightBurnProject } from "./lightburn.js";
+import { generateLightBurnProject, hasRetroTemplate } from "./lightburn.js";
 import { logger, logError } from "./logger.js";
 
 const app = Fastify({ 
@@ -55,6 +55,68 @@ await app.register(fastifyStatic, {
 runMigrations();
 
 logger.info("Victoria Laser App server initializing...");
+
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Calculate overall order status based on front and retro statuses
+ */
+function calculateOverallStatus(
+  fronteStatus: string,
+  retroStatus: string
+): 'pending' | 'processing' | 'printed' | 'error' {
+  // If either side has an error, overall is error
+  if (fronteStatus === 'error' || retroStatus === 'error') {
+    return 'error';
+  }
+  
+  // If either side is processing, overall is processing
+  if (fronteStatus === 'processing' || retroStatus === 'processing') {
+    return 'processing';
+  }
+  
+  // Both sides must be printed (or retro is not_required) for overall to be printed
+  if (fronteStatus === 'printed' && (retroStatus === 'printed' || retroStatus === 'not_required')) {
+    return 'printed';
+  }
+  
+  // Otherwise, overall is pending
+  return 'pending';
+}
+
+/**
+ * Update overall order status based on side statuses
+ */
+async function updateOverallStatus(orderId: string): Promise<void> {
+  const order = await db.select().from(orders).where(eq(orders.orderId, orderId)).limit(1);
+  
+  if (order.length === 0) {
+    return;
+  }
+  
+  const currentOrder = order[0];
+  const newStatus = calculateOverallStatus(
+    currentOrder.fronteStatus,
+    currentOrder.retroStatus
+  );
+  
+  // Only update if status changed
+  if (currentOrder.status !== newStatus) {
+    await db
+      .update(orders)
+      .set({
+        status: newStatus,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      })
+      .where(eq(orders.orderId, orderId))
+      .run();
+    
+    logger.info(
+      { orderId, oldStatus: currentOrder.status, newStatus },
+      "Overall order status updated"
+    );
+  }
+}
 
 app.get("/health", async () => ({ ok: true }));
 
@@ -149,6 +211,309 @@ app.get("/orders", async (request) => {
 const paramsSchema = z.object({
   orderId: z.string().min(1)
 });
+
+/**
+ * Handle side-specific LightBurn processing (front or retro)
+ */
+const handleSideProcessing = async (
+  request: { params: unknown },
+  reply: any,
+  side: 'front' | 'retro'
+) => {
+  const { orderId } = paramsSchema.parse(request.params);
+  const sideLabel = side === 'retro' ? 'retro' : 'fronte';
+  logger.info({ orderId, side: sideLabel }, `${sideLabel} side processing requested`);
+  
+  // Fetch the order from database
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const order = rows[0];
+  if (!order) {
+    logger.warn({ orderId }, "Order not found in database");
+    reply.code(404);
+    return { error: "Order not found" };
+  }
+
+  // Get side-specific status fields
+  const statusField = side === 'retro' ? 'retroStatus' : 'fronteStatus';
+  const errorField = side === 'retro' ? 'retroErrorMessage' : 'fronteErrorMessage';
+  const attemptField = side === 'retro' ? 'retroAttemptCount' : 'fronteAttemptCount';
+  const processedField = side === 'retro' ? 'retroProcessedAt' : 'fronteProcessedAt';
+  
+  const currentStatus = order[statusField];
+  const currentAttemptCount = order[attemptField];
+
+  logger.info(
+    {
+      id: order.id,
+      orderId: order.orderId,
+      sku: order.sku,
+      side: sideLabel,
+      status: currentStatus,
+      attemptCount: currentAttemptCount
+    },
+    "Order found, validating status"
+  );
+
+  // ==================== PHASE 1: PRE-FLIGHT VALIDATION ====================
+  
+  // Check if retro is not required
+  if (side === 'retro' && currentStatus === 'not_required') {
+    logger.warn(
+      { orderId, status: currentStatus },
+      "Retro processing requested but retro is not required for this order"
+    );
+    reply.code(400);
+    return {
+      error: "Retro side is not required for this order",
+      status: currentStatus
+    };
+  }
+  
+  // Check if side is already being processed
+  if (currentStatus === 'processing') {
+    logger.warn(
+      { orderId, side: sideLabel, status: currentStatus },
+      `${sideLabel} side is already being processed`
+    );
+    reply.code(409);
+    return {
+      error: `${sideLabel} side is already being processed. Please wait or refresh to see the latest status.`,
+      status: currentStatus,
+      attemptCount: currentAttemptCount
+    };
+  }
+
+  // Check if side was already printed (allow retry with warning)
+  if (currentStatus === 'printed') {
+    logger.warn(
+      { orderId, side: sideLabel, status: currentStatus, processedAt: order[processedField] },
+      `${sideLabel} side was already printed, allowing retry`
+    );
+  }
+
+  // Migrate old configuration errors to new format
+  if (currentStatus === 'error' && order[errorField]) {
+    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const isOldConfigError = configErrorPattern.test(order[errorField]) && 
+                            !order[errorField].startsWith('CONFIG_ERROR:');
+    
+    if (isOldConfigError) {
+      logger.info(
+        { orderId, side: sideLabel, oldErrorMessage: order[errorField] },
+        "Migrating old config error to new format"
+      );
+      
+      const updateData = {
+        [errorField]: `CONFIG_ERROR: ${order[errorField]}`,
+        [attemptField]: 999,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      };
+      
+      await db.update(orders)
+        .set(updateData)
+        .where(eq(orders.orderId, orderId))
+        .run();
+      
+      logger.info({ orderId, side: sideLabel }, "Migrated old config error to new format");
+      
+      // Update local order object
+      order[errorField] = `CONFIG_ERROR: ${order[errorField]}`;
+      order[attemptField] = 999;
+    }
+  }
+
+  // ==================== PHASE 2: SET PROCESSING STATE ====================
+  
+  logger.info(
+    { orderId, side: sideLabel, previousStatus: currentStatus, currentAttemptCount },
+    `Setting ${sideLabel} status to 'processing'`
+  );
+
+  const updateData = {
+    [statusField]: 'processing' as const,
+    [errorField]: null,
+    updatedAt: sql`CURRENT_TIMESTAMP`
+  };
+
+  const updateResult = await db
+    .update(orders)
+    .set(updateData)
+    .where(eq(orders.orderId, orderId))
+    .run();
+
+  if (updateResult.changes === 0) {
+    logger.error({ orderId, side: sideLabel }, `Failed to update ${sideLabel} status to 'processing'`);
+    reply.code(500);
+    return { error: `Failed to lock ${sideLabel} side for processing` };
+  }
+
+  logger.info(
+    { orderId, side: sideLabel, status: 'processing', attemptCount: currentAttemptCount },
+    `${sideLabel} side locked for processing`
+  );
+
+  // Resolve the templates directory
+  const templatesDir = path.join(process.cwd(), "templates");
+  const defaultTemplatePath = path.join(templatesDir, `targhetta-osso-${sideLabel}.lbrn2`);
+
+  // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
+  
+  try {
+    logger.info({ orderId, side: sideLabel, templatePath: defaultTemplatePath }, "Starting LightBurn project generation");
+    
+    const result = await generateLightBurnProject(order, defaultTemplatePath, side);
+    
+    logger.info(
+      { 
+        orderId: result.orderId,
+        side: sideLabel,
+        wslPath: result.wslPath,
+        windowsPath: result.windowsPath 
+      },
+      `LightBurn project generated successfully for ${sideLabel} side`
+    );
+    
+    // Update the side status to 'printed' with timestamp
+    const successUpdateData = {
+      [statusField]: 'printed' as const,
+      [processedField]: sql`CURRENT_TIMESTAMP`,
+      [errorField]: null,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    };
+    
+    const finalUpdateResult = await db
+      .update(orders)
+      .set(successUpdateData)
+      .where(eq(orders.orderId, orderId))
+      .run();
+
+    if (finalUpdateResult.changes === 0) {
+      logger.error({ orderId, side: sideLabel }, `Failed to update ${sideLabel} status to 'printed'`);
+    } else {
+      logger.info(
+        { orderId, side: sideLabel, status: 'printed', attemptCount: currentAttemptCount },
+        `${sideLabel} status updated to 'printed'`
+      );
+    }
+    
+    // Update overall order status
+    await updateOverallStatus(orderId);
+    
+    logger.info(
+      { 
+        orderId,
+        side: sideLabel,
+        status: 'printed', 
+        attemptCount: currentAttemptCount,
+        errorType: 'none'
+      },
+      `Final ${sideLabel} state after processing (success)`
+    );
+    
+    return {
+      success: true,
+      side: sideLabel,
+      orderId: result.orderId,
+      wslPath: result.wslPath,
+      windowsPath: result.windowsPath,
+      message: `LightBurn project generated and launched successfully for ${sideLabel} side`,
+      warning: currentStatus === 'printed' ? `This ${sideLabel} side was already marked as printed. Reprocessed successfully.` : undefined
+    };
+    
+  } catch (error) {
+    // ==================== PHASE 4: ERROR HANDLING WITH SMART RETRY ====================
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    logger.error({ 
+      orderId,
+      side: sideLabel,
+      errorMessage, 
+      errorStack: error instanceof Error ? error.stack : undefined 
+    }, `generateLightBurnProject failed for ${sideLabel} side`);
+    
+    // Classify error type
+    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const isConfigError = configErrorPattern.test(errorMessage);
+    
+    logger.info({ orderId, side: sideLabel, isConfigError, errorMessage }, "Error classification result");
+    
+    // Build update object based on error type
+    let errorUpdateData: any;
+    
+    if (isConfigError) {
+      // Configuration error - no retry, requires manual fix
+      errorUpdateData = {
+        [statusField]: 'error' as const,
+        [errorField]: errorMessage.startsWith('CONFIG_ERROR:') 
+          ? errorMessage 
+          : 'CONFIG_ERROR: ' + errorMessage,
+        [attemptField]: 999,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      };
+      
+      logger.warn({ orderId, side: sideLabel, sku: order.sku }, "Configuration error - requires manual intervention");
+    } else {
+      // Transient error - use retry logic
+      const newAttemptCount = (currentAttemptCount || 0) + 1;
+      const shouldRetry = newAttemptCount < 3;
+      
+      errorUpdateData = {
+        [statusField]: shouldRetry ? ('pending' as const) : ('error' as const),
+        [errorField]: errorMessage,
+        [attemptField]: newAttemptCount,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      };
+      
+      logger.info({ orderId, side: sideLabel, newAttemptCount, shouldRetry }, "Transient error - retry logic applied");
+    }
+    
+    // Execute the database update
+    await db.update(orders)
+      .set(errorUpdateData)
+      .where(eq(orders.orderId, orderId))
+      .run();
+    
+    logger.info({ orderId, side: sideLabel, finalStatus: errorUpdateData[statusField], attemptCount: errorUpdateData[attemptField] }, `${sideLabel} state updated in database`);
+    
+    // Update overall order status
+    await updateOverallStatus(orderId);
+    
+    // Verification logging
+    const verifyOrder = await db.select()
+      .from(orders)
+      .where(eq(orders.orderId, orderId))
+      .limit(1);
+    
+    logger.info({ 
+      orderId,
+      side: sideLabel,
+      dbStatus: verifyOrder[0]?.[statusField], 
+      dbAttemptCount: verifyOrder[0]?.[attemptField],
+      dbErrorMessage: verifyOrder[0]?.[errorField] 
+    }, "Database state verification");
+    
+    // Return appropriate error response
+    if (isConfigError) {
+      reply.code(400);
+    } else {
+      reply.code(500);
+    }
+    
+    return { 
+      error: errorMessage,
+      side: sideLabel,
+      errorType: isConfigError ? 'configuration' : 'transient',
+      status: errorUpdateData[statusField],
+      attemptCount: errorUpdateData[attemptField]
+    };
+  }
+};
 
 const handleLightburn = async (request: { params: unknown }, reply: any) => {
   const { orderId } = paramsSchema.parse(request.params);
@@ -411,6 +776,41 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
 
 app.post("/orders/:orderId/lightburn", async (request, reply) => {
   return handleLightburn(request, reply);
+});
+
+// New endpoints for side-specific processing
+app.post("/orders/:orderId/lightburn/front", async (request, reply) => {
+  return handleSideProcessing(request, reply, 'front');
+});
+
+app.post("/orders/:orderId/lightburn/retro", async (request, reply) => {
+  return handleSideProcessing(request, reply, 'retro');
+});
+
+// Check if retro template is available for an order
+app.get("/orders/:orderId/retro-available", async (request, reply) => {
+  const { orderId } = paramsSchema.parse(request.params);
+  
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const order = rows[0];
+  if (!order) {
+    reply.code(404);
+    return { error: "Order not found" };
+  }
+
+  const available = await hasRetroTemplate(order.sku);
+  
+  return {
+    orderId: order.orderId,
+    sku: order.sku,
+    retroAvailable: available,
+    retroStatus: order.retroStatus
+  };
 });
 
 app.post("/orders/:orderId/ezcad", async (request, reply) => {
