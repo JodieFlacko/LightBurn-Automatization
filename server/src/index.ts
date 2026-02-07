@@ -222,9 +222,20 @@ const handleSideProcessing = async (
 ) => {
   const { orderId } = paramsSchema.parse(request.params);
   const sideLabel = side === 'retro' ? 'retro' : 'fronte';
-  logger.info({ orderId, side: sideLabel }, `${sideLabel} side processing requested`);
+  const endpoint = side === 'retro' ? '/lightburn/retro' : '/lightburn/front';
+  
+  console.log('=== HANDLE SIDE PROCESSING START ===');
+  console.log('Order ID:', orderId);
+  console.log('Side:', side);
+  console.log('Side label:', sideLabel);
+  console.log('Endpoint:', endpoint);
+  
+  // LOG: Endpoint being called
+  logger.info({ orderId, side: sideLabel, endpoint }, `=== SIDE PROCESSING START: ${endpoint} ===`);
+  logger.info({ orderId, side: sideLabel, endpoint }, `Endpoint called: POST /orders/:orderId${endpoint.replace('/lightburn', '/lightburn')}`);
   
   // Fetch the order from database
+  console.log('Fetching order from database...');
   const rows = await db
     .select()
     .from(orders)
@@ -232,7 +243,10 @@ const handleSideProcessing = async (
     .limit(1);
 
   const order = rows[0];
+  console.log('Order found:', order);
+  
   if (!order) {
+    console.log('ERROR: Order not found in database');
     logger.warn({ orderId }, "Order not found in database");
     reply.code(404);
     return { error: "Order not found" };
@@ -246,6 +260,9 @@ const handleSideProcessing = async (
   
   const currentStatus = order[statusField];
   const currentAttemptCount = order[attemptField];
+  
+  console.log('Current status:', currentStatus);
+  console.log('Current attempt count:', currentAttemptCount);
 
   logger.info(
     {
@@ -298,7 +315,7 @@ const handleSideProcessing = async (
 
   // Migrate old configuration errors to new format
   if (currentStatus === 'error' && order[errorField]) {
-    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const configErrorPattern = /NO_TEMPLATE_MATCH:|TEMPLATE_FILE_NOT_FOUND:|no template|configuration required|template.*not found/i;
     const isOldConfigError = configErrorPattern.test(order[errorField]) && 
                             !order[errorField].startsWith('CONFIG_ERROR:');
     
@@ -364,6 +381,10 @@ const handleSideProcessing = async (
   // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
   
   try {
+    console.log('About to generate project');
+    console.log('Template path:', defaultTemplatePath);
+    console.log('Side:', side);
+    
     logger.info({ orderId, side: sideLabel, templatePath: defaultTemplatePath }, "Starting LightBurn project generation");
     
     const result = await generateLightBurnProject(order, defaultTemplatePath, side);
@@ -428,20 +449,45 @@ const handleSideProcessing = async (
   } catch (error) {
     // ==================== PHASE 4: ERROR HANDLING WITH SMART RETRY ====================
     
+    console.log('ERROR CAUGHT:', error instanceof Error ? error.message : String(error));
+    console.log('Error type:', error instanceof Error ? error.constructor.name : typeof error);
+    console.log('Full error object:', error);
+    
     const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // LOG: Exact error message caught
+    logger.error({ 
+      orderId,
+      side: sideLabel,
+      endpoint,
+      errorMessage, 
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorStack: error instanceof Error ? error.stack : undefined 
+    }, `=== ERROR CAUGHT in ${sideLabel} side processing ===`);
     
     logger.error({ 
       orderId,
       side: sideLabel,
-      errorMessage, 
-      errorStack: error instanceof Error ? error.stack : undefined 
-    }, `generateLightBurnProject failed for ${sideLabel} side`);
+      endpoint,
+      errorMessage
+    }, "Exact error message caught");
     
     // Classify error type
-    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const configErrorPattern = /NO_TEMPLATE_MATCH:|TEMPLATE_FILE_NOT_FOUND:|no template|configuration required|template.*not found/i;
     const isConfigError = configErrorPattern.test(errorMessage);
     
-    logger.info({ orderId, side: sideLabel, isConfigError, errorMessage }, "Error classification result");
+    // LOG: Error classification result
+    logger.info({ 
+      orderId, 
+      side: sideLabel, 
+      endpoint,
+      isConfigError, 
+      errorMessage,
+      classificationPattern: configErrorPattern.toString(),
+      reason: isConfigError 
+        ? "Error message matches configuration error pattern" 
+        : "Error message does NOT match configuration error pattern"
+    }, "Error classification result (isConfigError = " + isConfigError + ")");
     
     // Build update object based on error type
     let errorUpdateData: any;
@@ -572,7 +618,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
 
   // Migrate old configuration errors to new format
   if (order.status === 'error' && order.errorMessage) {
-    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const configErrorPattern = /NO_TEMPLATE_MATCH:|TEMPLATE_FILE_NOT_FOUND:|no template|configuration required|template.*not found/i;
     const isOldConfigError = configErrorPattern.test(order.errorMessage) && 
                             !order.errorMessage.startsWith('CONFIG_ERROR:');
     
@@ -702,7 +748,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     }, "generateLightBurnProject failed");
     
     // Classify error type FIRST
-    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const configErrorPattern = /NO_TEMPLATE_MATCH:|TEMPLATE_FILE_NOT_FOUND:|no template|configuration required|template.*not found/i;
     const isConfigError = configErrorPattern.test(errorMessage);
     
     logger.info({ orderId, isConfigError, errorMessage }, "Error classification result");

@@ -385,7 +385,7 @@ export default function App() {
     );
     
     try {
-      const response = await fetch(`${API_URL}/orders/${orderId}/lightburn/${sideLabel}`, {
+      const response = await fetch(`${API_URL}/orders/${orderId}/lightburn/${side}`, {
         method: "POST"
       });
       const data = await response.json();

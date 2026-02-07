@@ -235,37 +235,73 @@ export async function syncOrders(): Promise<SyncResult> {
   }
 
   // Update retroStatus for orders based on retro template availability
-  if (added > 0 || duplicates > 0) {
-    logger.info("Checking retro template availability for orders");
+  if (incomingOrderIds.size > 0) {
+    logger.info({ orderCount: incomingOrderIds.size }, "Checking retro template availability for synced orders");
     
-    // Get all orders that have retroStatus='not_required' to check if retro templates exist
+    // Get all orders that have retroStatus='not_required'
     const allOrders = await db
       .select()
       .from(orders)
       .where(eq(orders.retroStatus, 'not_required'))
       .all();
     
+    // Filter to only check orders from this sync
+    const ordersToCheck = allOrders.filter(order => 
+      incomingOrderIds.has(order.orderId)
+    );
+    
+    // Group orders by SKU to avoid checking the same SKU multiple times
+    const ordersBySku = new Map<string, typeof ordersToCheck>();
+    for (const order of ordersToCheck) {
+      if (order.sku) {
+        if (!ordersBySku.has(order.sku)) {
+          ordersBySku.set(order.sku, []);
+        }
+        ordersBySku.get(order.sku)!.push(order);
+      }
+    }
+    
     let retroUpdated = 0;
-    for (const order of allOrders) {
-      const hasRetro = await hasRetroTemplate(order.sku);
+    const skusWithRetro: string[] = [];
+    
+    // Check each unique SKU once
+    for (const [sku, ordersForSku] of ordersBySku.entries()) {
+      const hasRetro = await hasRetroTemplate(sku);
       
       if (hasRetro) {
-        // Update retroStatus to 'pending' if retro template exists
-        await db
-          .update(orders)
-          .set({
-            retroStatus: 'pending',
-            updatedAt: sql`CURRENT_TIMESTAMP`
-          })
-          .where(eq(orders.orderId, order.orderId))
-          .run();
+        skusWithRetro.push(sku);
         
-        retroUpdated++;
+        // Update all orders with this SKU
+        for (const order of ordersForSku) {
+          await db
+            .update(orders)
+            .set({
+              retroStatus: 'pending',
+              updatedAt: sql`CURRENT_TIMESTAMP`
+            })
+            .where(eq(orders.orderId, order.orderId))
+            .run();
+          
+          retroUpdated++;
+          logger.info(
+            { sku, orderId: order.orderId },
+            `Retro template found for SKU: ${sku}, setting retroStatus='pending'`
+          );
+        }
       }
     }
     
     if (retroUpdated > 0) {
-      logger.info({ retroUpdated }, "Updated retroStatus for orders with retro templates");
+      logger.info(
+        { 
+          retroUpdated, 
+          skusWithRetro: skusWithRetro.join(', '),
+          skuCount: skusWithRetro.length
+        }, 
+        `Updated retroStatus for ${retroUpdated} order(s) across ${skusWithRetro.length} SKU(s) with retro templates`
+      );
+    } else if (ordersToCheck.length > 0) {
+      logger.info("No retro templates found for any synced orders");
     }
   }
 

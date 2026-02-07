@@ -305,9 +305,16 @@ async function copyImageToTemp(imageName: string): Promise<string> {
  * @returns The template filename or null if no match
  */
 async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 'front'): Promise<string | null> {
-  logger.info({ sku, side }, "Starting SKU template matching");
+  console.log('=== FIND TEMPLATE START ===');
+  console.log('SKU:', sku);
+  console.log('Side:', side);
+  
+  // LOG: Input parameters
+  logger.info({ sku, side }, "=== TEMPLATE MATCHING START ===");
+  logger.info({ sku, side }, "Input parameters - SKU and side");
   
   if (!sku) {
+    console.log('No SKU provided, returning null');
     logger.warn("No SKU provided, returning null");
     return null;
   }
@@ -319,10 +326,20 @@ async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 
     .orderBy(desc(templateRules.priority))
     .all();
 
-  logger.debug({ ruleCount: rules.length }, "Template rules loaded");
+  console.log('All rules:', rules);
+  console.log('Rule count:', rules.length);
+  
+  // LOG: Template rules fetched from database
+  logger.info({ ruleCount: rules.length }, "Template rules fetched from database");
+  logger.info({ rules: rules.map(r => ({ 
+    id: r.id, 
+    skuPattern: r.skuPattern, 
+    templateFilename: r.templateFilename, 
+    priority: r.priority 
+  })) }, "All template rules (full list)");
 
   if (rules.length === 0) {
-    logger.warn("No template rules configured in database");
+    logger.warn("No template rules configured in database - MATCH FAILED: NO RULES");
     return null;
   }
 
@@ -334,24 +351,82 @@ async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 
     return b.skuPattern.length - a.skuPattern.length; // Longer pattern first
   });
 
+  logger.info({ 
+    sortedRules: sortedRules.map(r => ({ 
+      skuPattern: r.skuPattern, 
+      templateFilename: r.templateFilename, 
+      priority: r.priority 
+    })) 
+  }, "Rules sorted by priority (higher first) and pattern length (longer first)");
+
   // Normalize SKU for case-insensitive matching
   const normalizedSku = sku.toLowerCase();
+  logger.info({ originalSku: sku, normalizedSku }, "SKU normalized for case-insensitive matching");
   
   // Determine template suffix based on side
   const sideSuffix = side === 'retro' ? '-retro.lbrn2' : '-fronte.lbrn2';
   const fallbackSuffix = '.lbrn2'; // For backward compatibility with templates without side suffix
+  
+  logger.info({ side, sideSuffix, fallbackSuffix }, "Template suffix determined based on side");
 
   // Find the first rule where the SKU contains the pattern (case-insensitive)
+  console.log('=== STARTING PATTERN MATCHING LOOP ===');
+  logger.info("=== STARTING PATTERN MATCHING LOOP ===");
+  
   for (const rule of sortedRules) {
     const normalizedPattern = rule.skuPattern.toLowerCase();
     
-    if (normalizedSku.includes(normalizedPattern)) {
+    console.log('Testing rule:', rule.id, 'Pattern:', rule.skuPattern, 'Template:', rule.templateFilename);
+    
+    // LOG: Test each pattern
+    logger.info({ 
+      ruleId: rule.id,
+      skuPattern: rule.skuPattern, 
+      normalizedPattern,
+      templateFilename: rule.templateFilename,
+      normalizedSku,
+      side
+    }, "Testing pattern against SKU");
+    
+    const patternMatches = normalizedSku.includes(normalizedPattern);
+    console.log('Pattern matches:', patternMatches);
+    
+    logger.info({ 
+      patternMatches, 
+      reason: patternMatches 
+        ? `SKU '${normalizedSku}' contains pattern '${normalizedPattern}'`
+        : `SKU '${normalizedSku}' does NOT contain pattern '${normalizedPattern}'`
+    }, "Pattern match test result");
+    
+    if (patternMatches) {
       const templateName = rule.templateFilename.toLowerCase();
+      
+      console.log('Pattern matched! Template name:', templateName);
+      console.log('Checking side compatibility for side:', side);
+      
+      logger.info({ 
+        templateName, 
+        templateFilename: rule.templateFilename,
+        side,
+        checkingFor: side === 'retro' ? 'ends with -retro.lbrn2' : 'ends with -fronte.lbrn2 OR generic .lbrn2'
+      }, "Pattern matched! Checking template side compatibility");
       
       // Check if template matches the requested side
       if (side === 'retro') {
         // For retro, only match templates with -retro suffix
-        if (templateName.endsWith('-retro.lbrn2')) {
+        const isRetroTemplate = templateName.endsWith('-retro.lbrn2');
+        console.log('Is retro template:', isRetroTemplate);
+        
+        logger.info({ 
+          isRetroTemplate,
+          templateName,
+          reason: isRetroTemplate 
+            ? `Template '${templateName}' ends with '-retro.lbrn2'` 
+            : `Template '${templateName}' does NOT end with '-retro.lbrn2' (skipping)`
+        }, "Retro side compatibility check");
+        
+        if (isRetroTemplate) {
+          console.log('✓ MATCH FOUND for retro side:', rule.templateFilename);
           logger.info(
             { 
               sku, 
@@ -360,13 +435,41 @@ async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 
               priority: rule.priority,
               side
             },
-            "Template match found for retro side"
+            "✓ MATCH FOUND for retro side"
           );
           return rule.templateFilename;
+        } else {
+          logger.warn({ 
+            sku,
+            pattern: rule.skuPattern,
+            templateFilename: rule.templateFilename,
+            reason: "Template doesn't end with -retro.lbrn2"
+          }, "✗ Pattern matched but template not compatible with retro side (continuing search)");
         }
       } else {
         // For front, match templates with -fronte suffix or no suffix (backward compatibility)
-        if (templateName.endsWith('-fronte.lbrn2') || (!templateName.endsWith('-retro.lbrn2') && templateName.endsWith('.lbrn2'))) {
+        const isFronteTemplate = templateName.endsWith('-fronte.lbrn2');
+        const isGenericTemplate = !templateName.endsWith('-retro.lbrn2') && templateName.endsWith('.lbrn2');
+        const isFrontCompatible = isFronteTemplate || isGenericTemplate;
+        
+        console.log('Is fronte template:', isFronteTemplate);
+        console.log('Is generic template:', isGenericTemplate);
+        console.log('Is front compatible:', isFrontCompatible);
+        
+        logger.info({ 
+          isFronteTemplate,
+          isGenericTemplate,
+          isFrontCompatible,
+          templateName,
+          reason: isFrontCompatible
+            ? (isFronteTemplate 
+                ? `Template '${templateName}' ends with '-fronte.lbrn2'` 
+                : `Template '${templateName}' is generic (ends with .lbrn2 but not -retro.lbrn2)`)
+            : `Template '${templateName}' is not compatible with front side`
+        }, "Front side compatibility check");
+        
+        if (isFrontCompatible) {
+          console.log('✓ MATCH FOUND for front side:', rule.templateFilename);
           logger.info(
             { 
               sku, 
@@ -375,15 +478,35 @@ async function findTemplateForSku(sku: string | null, side: 'front' | 'retro' = 
               priority: rule.priority,
               side
             },
-            "Template match found for front side"
+            "✓ MATCH FOUND for front side"
           );
           return rule.templateFilename;
+        } else {
+          logger.warn({ 
+            sku,
+            pattern: rule.skuPattern,
+            templateFilename: rule.templateFilename,
+            reason: "Template is retro-specific but front side requested"
+          }, "✗ Pattern matched but template not compatible with front side (continuing search)");
         }
       }
     }
   }
 
-  logger.warn({ sku, side }, "No matching template rule found");
+  // LOG: No match found
+  console.log('✗ NO MATCHING TEMPLATE FOUND');
+  console.log('Rules checked:', sortedRules.length);
+  
+  logger.warn({ 
+    sku, 
+    normalizedSku,
+    side,
+    rulesChecked: sortedRules.length,
+    reason: "No template rule matched the SKU pattern for the requested side"
+  }, "✗ NO MATCHING TEMPLATE FOUND - exhausted all rules");
+  
+  logger.info("=== TEMPLATE MATCHING END (NO MATCH) ===");
+  
   return null;
 }
 
@@ -432,7 +555,7 @@ export async function generateLightBurnProject(
     const matchedTemplate = await findTemplateForSku(order.sku, side);
     
     if (!matchedTemplate) {
-      const error = new Error(`NO_TEMPLATE_MATCH: No ${side} template found for SKU '${order.sku || "(none)"}'`);
+      const error = new Error(`NO_TEMPLATE_MATCH: No template found for SKU '${order.sku || "(none)"}' (side: ${side})`);
       logError(error, { orderId: order.orderId, sku: order.sku, side });
       throw error;
     }
