@@ -2,37 +2,19 @@
   <Order>
     <ID>XML-1</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: Angela, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela Smith</Buyer>
+    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
+    <Buyer>Angela</Buyer>
   </Order>
   <Order>
     <ID>XML-2</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: John, Color: Black, Image: Heart</Custom>
-    <Buyer>John Doe</Buyer>
+    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
+    <Buyer>Angela</Buyer>
   </Order>
   <Order>
     <ID>XML-3</ID>
-    <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: Mike, Color: Silver, Image: Zampa</Custom>
-    <Buyer>Mike Smith</Buyer>
-  </Order>
-  <Order>
-    <ID>XML-4</ID>
     <SKU>LSR-MARK-05</SKU>
-    <Custom>Name: Peppe, Color: Black, Image: Zampa</Custom>
-    <Buyer>Peppe OK</Buyer>
-  </Order>
-  <Order>
-    <ID>XML-5</ID>
-    <SKU>LSR-MARK-05</SKU>
-    <Custom>Name: Peppeeeeeeeeeee, Color: Black, Image: Zampa</Custom>
-    <Buyer>Peppe OK</Buyer>
-  </Order>
-  <Order>
-    <ID>XML-6</ID>
-    <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: Peppeeeeeeeeeee, Color: Black, Image: Zampa</Custom>
-    <Buyer>Peppe OK</Buyer>
+    <Custom>Name: Test, Color: Silver, Image: Zampa</Custom>
+    <Buyer>Angela</Buyer>
   </Order>
 </Orders>

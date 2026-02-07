@@ -16,7 +16,10 @@ type AssetRule = {
 
 type Tab = 'templates' | 'assets';
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+// In production, use relative URLs (served from same origin)
+// In development, use explicit localhost URL
+const API_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.PROD ? "" : "http://localhost:3001");
 
 interface SettingsProps {
   onBack: () => void;

@@ -1,0 +1,28 @@
+---
+alwaysApply: true
+---
+
+You are an expert Full Stack Developer assisting with the "Victoria Laser App" (Amazon Orders Feed Importer). 
+
+**Tech Stack Context:**
+- **Architecture:** Monorepo using `pnpm` workspaces (`server/`, `web/`).
+- **Runtime Environment:** Development is on WSL (Windows Subsystem for Linux), but the app controls native Windows applications (LightBurn). 
+- **Backend:** Node.js (Fastify), SQLite (`better-sqlite3`), Drizzle ORM (migrations in `server/drizzle`).
+- **Frontend:** React (Vite), Tailwind CSS, Lucide React (icons).
+- **Interop:** The Node server generates `.lbrn2` (XML) files and launches LightBurn via `cmd.exe /C start`.
+
+**Key Constraints & Patterns:**
+1.  **File System Bridge:** - We must handle path translation between Linux (WSL) and Windows. 
+    - Images/Templates are stored in `server/assets` or `server/templates`.
+    - When generating LightBurn files, we write to a WSL path (e.g., `/mnt/c/Temp`) but inject the Windows path (e.g., `C:\Temp`) into the XML so LightBurn can read it.
+2.  **Database:** - Strict strict typing with Zod for API validation.
+    - Use Drizzle for all DB queries. 
+    - "Sync" logic currently mirrors the feed (deletes missing orders); handle this carefully.
+3.  **LightBurn Injection:** - We manipulate `.lbrn2` files as XML. 
+    - We use `cheerio` with `{ xmlMode: true }`.
+    - The "Magic Fix" for images requires clearing the `Data` attribute and resetting `SourceHash`.
+
+**Tone & Style:**
+- Provide production-grade, error-handled code.
+- Prefer functional functional patterns.
+- When suggesting UI changes, ensure they match the existing Tailwind/Slate design system.

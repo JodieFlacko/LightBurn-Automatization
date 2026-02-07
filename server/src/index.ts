@@ -184,27 +184,14 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     "Order found, proceeding with LightBurn generation"
   );
 
-  // Resolve the template path
-  const templatePath = path.join(
-    process.cwd(),
-    "templates",
-    "LightBurn-Osso-Template.lbrn2"
-  );
-
-  // Check if the template exists
-  try {
-    await fs.access(templatePath);
-  } catch (error) {
-    reply.code(500);
-    return {
-      error: "Template file not found",
-      templatePath,
-    };
-  }
+  // Resolve the templates directory
+  // The actual template file is selected dynamically based on SKU matching rules
+  const templatesDir = path.join(process.cwd(), "templates");
+  const defaultTemplatePath = path.join(templatesDir, "targhetta-osso-fronte.lbrn2");
 
   // Generate the LightBurn project
   try {
-    const result = await generateLightBurnProject(order, templatePath);
+    const result = await generateLightBurnProject(order, defaultTemplatePath);
     
     // Update the order status to 'printed'
     await db
