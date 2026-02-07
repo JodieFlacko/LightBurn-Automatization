@@ -14,3 +14,13 @@ release/
 
 server/db.sqlite
 server/output/
+
+# pnpm cache
+.pnpm-store/
+
+# Build outputs (frontend served by backend)
+server/public/
+
+# SQLite files
+*.sqlite
+*.sqlite-*
