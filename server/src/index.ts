@@ -205,19 +205,48 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     // Continue processing but we'll return a warning in the response
   }
 
+  // Migrate old configuration errors to new format
+  if (order.status === 'error' && order.errorMessage) {
+    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const isOldConfigError = configErrorPattern.test(order.errorMessage) && 
+                            !order.errorMessage.startsWith('CONFIG_ERROR:');
+    
+    if (isOldConfigError) {
+      logger.info(
+        { orderId, oldErrorMessage: order.errorMessage },
+        "Migrating old config error to new format"
+      );
+      
+      // Update to new format
+      db.update(orders)
+        .set({
+          errorMessage: `CONFIG_ERROR: ${order.errorMessage}`,
+          attemptCount: 999,
+          updatedAt: sql`CURRENT_TIMESTAMP`
+        })
+        .where(eq(orders.orderId, orderId))
+        .run();
+      
+      logger.info({ orderId }, "Migrated old config error to new format");
+      
+      // Update local order object to reflect migration
+      order.errorMessage = `CONFIG_ERROR: ${order.errorMessage}`;
+      order.attemptCount = 999;
+    }
+  }
+
   // ==================== PHASE 2: SET PROCESSING STATE ====================
   
   logger.info(
-    { orderId, previousStatus: order.status, newAttemptCount: order.attemptCount + 1 },
-    "Setting order status to 'processing' and incrementing attempt count"
+    { orderId, previousStatus: order.status, currentAttemptCount: order.attemptCount },
+    "Setting order status to 'processing'"
   );
 
-  // Update to 'processing' and increment attemptCount to lock the order
-  const updateResult = db
+  // Update to 'processing' - DO NOT increment attemptCount here (only in catch block for transient errors)
+  const updateResult = await db
     .update(orders)
     .set({
       status: 'processing',
-      attemptCount: order.attemptCount + 1,
       errorMessage: null, // Clear previous error message
       updatedAt: sql`CURRENT_TIMESTAMP`
     })
@@ -230,9 +259,8 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     return { error: "Failed to lock order for processing" };
   }
 
-  const currentAttemptCount = order.attemptCount + 1;
   logger.info(
-    { orderId, status: 'processing', attemptCount: currentAttemptCount },
+    { orderId, status: 'processing', attemptCount: order.attemptCount },
     "Order locked for processing"
   );
 
@@ -272,10 +300,21 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
       logger.error({ orderId }, "Failed to update order status to 'printed' after successful generation");
     } else {
       logger.info(
-        { orderId, status: 'printed', attemptCount: currentAttemptCount },
+        { orderId, status: 'printed', attemptCount: order.attemptCount },
         "Order status updated to 'printed'"
       );
     }
+    
+    // Step 4: Final state verification logging (success path)
+    logger.info(
+      { 
+        orderId, 
+        status: 'printed', 
+        attemptCount: order.attemptCount,
+        errorType: 'none'
+      },
+      "Final order state after processing (success)"
+    );
     
     return {
       success: true,
@@ -289,97 +328,83 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
   } catch (error) {
     // ==================== PHASE 4: ERROR HANDLING WITH SMART RETRY ====================
     
-    const errorMessage = error instanceof Error ? error.message : "Failed to generate project";
+    const errorMessage = error instanceof Error ? error.message : String(error);
     
-    logger.error(
-      { 
-        orderId, 
-        sku: order.sku, 
-        attemptCount: currentAttemptCount,
-        errorMessage 
-      },
-      "LightBurn generation failed"
-    );
-
-    // Determine if we should allow retry based on attempt count
-    const shouldRetry = currentAttemptCount < 3;
-    const finalStatus = shouldRetry ? 'pending' : 'error';
-
-    logger.info(
-      { 
-        orderId, 
-        attemptCount: currentAttemptCount, 
-        shouldRetry, 
-        finalStatus 
-      },
-      shouldRetry 
-        ? "Setting status back to 'pending' for automatic retry" 
-        : "Maximum attempts reached, setting status to 'error'"
-    );
-
-    // Update order with error details and appropriate status
-    const errorUpdateResult = db
-      .update(orders)
-      .set({ 
-        status: finalStatus,
-        errorMessage: errorMessage,
+    logger.error({ 
+      orderId, 
+      errorMessage, 
+      errorStack: error instanceof Error ? error.stack : undefined 
+    }, "generateLightBurnProject failed");
+    
+    // Classify error type FIRST
+    const configErrorPattern = /no template|configuration required|template.*not found/i;
+    const isConfigError = configErrorPattern.test(errorMessage);
+    
+    logger.info({ orderId, isConfigError, errorMessage }, "Error classification result");
+    
+    // Build update object based on error type
+    let updateData;
+    
+    if (isConfigError) {
+      // Configuration error - no retry, requires manual fix
+      updateData = {
+        status: 'error' as const,
+        errorMessage: errorMessage.startsWith('CONFIG_ERROR:') 
+          ? errorMessage 
+          : 'CONFIG_ERROR: ' + errorMessage,
+        attemptCount: 999,
         updatedAt: sql`CURRENT_TIMESTAMP`
-      })
+      };
+      
+      logger.warn({ orderId, sku: order.sku }, "Configuration error - requires manual intervention");
+    } else {
+      // Transient error - use retry logic
+      const newAttemptCount = (order.attemptCount || 0) + 1;
+      const shouldRetry = newAttemptCount < 3;
+      
+      updateData = {
+        status: shouldRetry ? ('pending' as const) : ('error' as const),
+        errorMessage: errorMessage,
+        attemptCount: newAttemptCount,
+        updatedAt: sql`CURRENT_TIMESTAMP`
+      };
+      
+      logger.info({ orderId, newAttemptCount, shouldRetry }, "Transient error - retry logic applied");
+    }
+    
+    // Execute the database update and WAIT for it
+    await db.update(orders)
+      .set(updateData)
       .where(eq(orders.orderId, orderId))
       .run();
-
-    if (errorUpdateResult.changes === 0) {
-      logger.error({ orderId }, "Failed to update order with error status");
+    
+    logger.info({ orderId, finalStatus: updateData.status, attemptCount: updateData.attemptCount }, "Order state updated in database");
+    
+    // Part 3: Verification logging - query database to confirm update
+    const verifyOrder = await db.select()
+      .from(orders)
+      .where(eq(orders.orderId, orderId))
+      .limit(1);
+    
+    logger.info({ 
+      orderId, 
+      dbStatus: verifyOrder[0]?.status, 
+      dbAttemptCount: verifyOrder[0]?.attemptCount,
+      dbErrorMessage: verifyOrder[0]?.errorMessage 
+    }, "Database state verification");
+    
+    // Return appropriate error response
+    if (isConfigError) {
+      reply.code(400);
     } else {
-      logger.info(
-        { orderId, status: finalStatus, errorMessage },
-        "Order status updated after error"
-      );
+      reply.code(500);
     }
     
-    // Determine error type and response code
-    let errorType = 'UNKNOWN';
-    let statusCode = 500;
-    let userMessage = errorMessage;
-
-    if (errorMessage.includes("NO_TEMPLATE_MATCH")) {
-      errorType = 'NO_TEMPLATE_MATCH';
-      statusCode = 400;
-      userMessage = `Configuration Required: No template found for SKU '${order.sku || "(none)"}'. Please add a rule in Settings.`;
-      logError(error, { orderId, sku: order.sku, errorType, attemptCount: currentAttemptCount });
-    } else if (errorMessage.includes("TEMPLATE_FILE_NOT_FOUND")) {
-      errorType = 'TEMPLATE_FILE_NOT_FOUND';
-      statusCode = 500;
-      userMessage = errorMessage.replace("TEMPLATE_FILE_NOT_FOUND: ", "");
-      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
-    } else if (errorMessage.includes("LIGHTBURN_NOT_FOUND")) {
-      errorType = 'LIGHTBURN_NOT_FOUND';
-      statusCode = 500;
-      userMessage = errorMessage.replace("LIGHTBURN_NOT_FOUND: ", "");
-      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
-    } else if (errorMessage.includes("LIGHTBURN_TIMEOUT")) {
-      errorType = 'LIGHTBURN_TIMEOUT';
-      statusCode = 500;
-      userMessage = errorMessage.replace("LIGHTBURN_TIMEOUT: ", "");
-      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
-    } else if (errorMessage.includes("LIGHTBURN_FILE_VERIFICATION_FAILED")) {
-      errorType = 'LIGHTBURN_FILE_VERIFICATION_FAILED';
-      statusCode = 500;
-      userMessage = errorMessage.replace("LIGHTBURN_FILE_VERIFICATION_FAILED: ", "");
-      logError(error, { orderId, errorType, attemptCount: currentAttemptCount });
-    } else {
-      errorType = 'GENERATION_FAILED';
-      logError(error, { orderId, sku: order.sku, errorType, attemptCount: currentAttemptCount, operation: "lightburn_generation" });
-    }
-    
-    reply.code(statusCode);
-    return {
-      error: userMessage,
-      errorType,
-      status: finalStatus,
-      attemptCount: currentAttemptCount,
-      retriesRemaining: shouldRetry ? 3 - currentAttemptCount : 0,
-      retryable: shouldRetry
+    return { 
+      error: errorMessage,
+      errorType: isConfigError ? 'configuration' : 'transient',
+      status: updateData.status,
+      attemptCount: updateData.attemptCount
     };
   }
 };
@@ -391,6 +416,105 @@ app.post("/orders/:orderId/lightburn", async (request, reply) => {
 app.post("/orders/:orderId/ezcad", async (request, reply) => {
   const result = await handleLightburn(request, reply);
   return { ...result, warning: "Deprecated; use /lightburn" };
+});
+
+// Retry failed order endpoint
+app.post("/orders/:orderId/retry", async (request, reply) => {
+  const { orderId } = paramsSchema.parse(request.params);
+  logger.info({ orderId }, "Order retry requested");
+
+  // Find the order
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const order = rows[0];
+  if (!order) {
+    logger.warn({ orderId }, "Order not found for retry");
+    reply.code(404);
+    return { error: "Order not found" };
+  }
+
+  logger.info(
+    { orderId, currentStatus: order.status, attemptCount: order.attemptCount },
+    "Order found, validating retry eligibility"
+  );
+
+  // Validate that order is not currently processing
+  if (order.status === 'processing') {
+    logger.warn(
+      { orderId, status: order.status },
+      "Cannot retry order that is currently processing"
+    );
+    reply.code(400);
+    return {
+      error: "Cannot retry order that is currently being processed. Please wait for the current process to complete.",
+      status: order.status
+    };
+  }
+
+  // Validate that order is in error or printed state (allow retry for printed orders too)
+  if (order.status !== 'error' && order.status !== 'printed') {
+    logger.warn(
+      { orderId, status: order.status },
+      "Order is not in error or printed state"
+    );
+    reply.code(400);
+    return {
+      error: `Order cannot be retried from '${order.status}' status. Only 'error' or 'printed' orders can be retried.`,
+      status: order.status
+    };
+  }
+
+  const previousStatus = order.status;
+  const previousAttemptCount = order.attemptCount;
+
+  logger.info(
+    { orderId, previousStatus, previousAttemptCount },
+    "Resetting order state for retry"
+  );
+
+  // Reset the order state
+  const updateResult = db
+    .update(orders)
+    .set({
+      status: 'pending',
+      errorMessage: null,
+      attemptCount: 0,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    })
+    .where(eq(orders.orderId, orderId))
+    .run();
+
+  if (updateResult.changes === 0) {
+    logger.error({ orderId }, "Failed to reset order state for retry");
+    reply.code(500);
+    return { error: "Failed to reset order for retry" };
+  }
+
+  // Fetch the updated order
+  const updatedRows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const updatedOrder = updatedRows[0];
+
+  logger.info(
+    { orderId, previousStatus, newStatus: updatedOrder.status },
+    "Order successfully reset for retry"
+  );
+
+  return {
+    success: true,
+    message: "Order reset successfully and ready for retry",
+    order: updatedOrder,
+    previousStatus,
+    previousAttemptCount
+  };
 });
 
 // Template Rules Management Endpoints

@@ -13,20 +13,14 @@
   </Order>
   <Order>
     <ID>XML-3</ID>
-    <SKU>LSR-MARK-05</SKU>
-    <Custom>Name: Test, Color: Silver, Image: Zampa</Custom>
+    <SKU>LSR-MARK-03</SKU>
+    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
     <Buyer>Angela</Buyer>
   </Order>
   <Order>
     <ID>XML-4</ID>
-    <SKU>LSR-MARK-05</SKU>
-    <Custom>Name: Giovanni, Color: Rosso, Image: Zampa</Custom>
-    <Buyer>Giovanni</Buyer>
-  </Order>
-  <Order>
-    <ID>XML-5</ID>
-    <SKU>LSR-MARK-05</SKU>
-    <Custom>Name: Gianluca, Color: Rosso, Image: Zampa</Custom>
-    <Buyer>Peppe</Buyer>
+    <SKU>LSR-MARK-04</SKU>
+    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
+    <Buyer>Angela</Buyer>
   </Order>
 </Orders>

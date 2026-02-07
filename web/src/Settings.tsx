@@ -23,16 +23,17 @@ const API_URL = import.meta.env.VITE_API_URL ||
 
 interface SettingsProps {
   onBack: () => void;
+  suggestedSku?: string | null;
 }
 
-export default function Settings({ onBack }: SettingsProps) {
+export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<Tab>('templates');
   const [rules, setRules] = useState<TemplateRule[]>([]);
   const [assetRules, setAssetRules] = useState<AssetRule[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [skuPattern, setSkuPattern] = useState("");
+  const [skuPattern, setSkuPattern] = useState(suggestedSku || "");
   const [templateFilename, setTemplateFilename] = useState("");
   const [priority, setPriority] = useState(0);
   
@@ -227,6 +228,25 @@ export default function Settings({ onBack }: SettingsProps) {
         {toast && (
           <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             {toast}
+          </div>
+        )}
+
+        {suggestedSku && (
+          <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <svg className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-orange-900 mb-1">
+                  Configuration Required
+                </h3>
+                <p className="text-sm text-orange-800">
+                  No template found for SKU '<span className="font-mono font-semibold">{suggestedSku}</span>'. 
+                  Add a template rule below, then go back to orders and use "Reset & Retry" to process the order.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

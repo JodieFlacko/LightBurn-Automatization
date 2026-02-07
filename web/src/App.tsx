@@ -18,6 +18,11 @@ type Order = {
 
 type View = "orders" | "settings";
 
+type ViewState = {
+  view: View;
+  suggestedSku?: string | null;
+};
+
 // In production, use relative URLs (served from same origin)
 // In development, use explicit localhost URL
 const API_URL = import.meta.env.VITE_API_URL || 
@@ -61,6 +66,24 @@ function StatusBadge({
   }
 
   if (order.status === 'error') {
+    // Check if this is a configuration error
+    const isConfigError = order.errorMessage?.startsWith('CONFIG_ERROR:');
+    
+    if (isConfigError) {
+      return (
+        <button
+          onClick={onErrorClick}
+          className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700 transition-colors hover:bg-orange-200"
+          title="Configuration error - click for details"
+        >
+          <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          Config Error
+        </button>
+      );
+    }
+    
     return (
       <button
         onClick={onErrorClick}
@@ -82,21 +105,45 @@ function StatusBadge({
 function ErrorDetailsModal({ 
   order, 
   onClose,
-  onRetry
+  onRetry,
+  onFixConfig,
+  isRetrying
 }: { 
   order: Order; 
   onClose: () => void;
   onRetry: () => void;
+  onFixConfig?: () => void;
+  isRetrying?: boolean;
 }) {
+  // Check if this is a configuration error
+  const isConfigError = order.errorMessage?.startsWith('CONFIG_ERROR:');
+  const displayMessage = isConfigError 
+    ? order.errorMessage?.replace('CONFIG_ERROR: ', '') 
+    : order.errorMessage;
+  
+  // Extract SKU from error message if it's a template match error
+  const skuMatch = displayMessage?.match(/SKU[:\s]+['"]([^'"]+)['"]/i);
+  const problematicSku = skuMatch ? skuMatch[1] : order.sku;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
       <div className="max-w-md rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            <svg 
+              className={`h-5 w-5 ${isConfigError ? 'text-orange-600' : 'text-red-600'}`} 
+              fill="currentColor" 
+              viewBox="0 0 20 20"
+            >
+              {isConfigError ? (
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              )}
             </svg>
-            <h3 className="text-lg font-semibold text-slate-900">Error Details</h3>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {isConfigError ? 'Configuration Error' : 'Error Details'}
+            </h3>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
@@ -105,40 +152,98 @@ function ErrorDetailsModal({
           </button>
         </div>
         
+        {isConfigError && (
+          <div className="mb-4 rounded-lg bg-orange-50 border border-orange-200 p-3">
+            <p className="text-sm text-orange-800">
+              <strong>⚠️ Configuration Required</strong>
+              <br />
+              Add a template rule in Settings, then click "Reset & Retry" to process this order.
+            </p>
+          </div>
+        )}
+        
         <div className="space-y-4">
           <div>
             <p className="text-sm font-medium text-slate-700">Order ID</p>
             <p className="text-sm text-slate-600">{order.orderId}</p>
           </div>
           
+          {problematicSku && (
+            <div>
+              <p className="text-sm font-medium text-slate-700">SKU</p>
+              <p className="text-sm text-slate-600 font-mono">{problematicSku}</p>
+            </div>
+          )}
+          
           <div>
             <p className="text-sm font-medium text-slate-700">Error Message</p>
-            <p className="text-sm text-red-700 bg-red-50 rounded px-3 py-2 border border-red-200">
-              {order.errorMessage || "Unknown error occurred"}
+            <p className={`text-sm rounded px-3 py-2 border ${
+              isConfigError 
+                ? 'text-orange-700 bg-orange-50 border-orange-200' 
+                : 'text-red-700 bg-red-50 border-red-200'
+            }`}>
+              {displayMessage || "Unknown error occurred"}
             </p>
           </div>
           
-          <div>
-            <p className="text-sm font-medium text-slate-700">Attempts</p>
-            <p className="text-sm text-slate-600">
-              Failed after {order.attemptCount || 0} attempt{(order.attemptCount || 0) !== 1 ? 's' : ''}
-            </p>
-          </div>
+          {!isConfigError && (
+            <div>
+              <p className="text-sm font-medium text-slate-700">Attempts</p>
+              <p className="text-sm text-slate-600">
+                Failed after {order.attemptCount || 0} attempt{(order.attemptCount || 0) !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
         </div>
         
         <div className="mt-6 flex gap-3">
-          <button
-            onClick={onRetry}
-            className="flex-1 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            Retry Order
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300"
-          >
-            Close
-          </button>
+          {isConfigError ? (
+            <>
+              <button
+                onClick={() => {
+                  onFixConfig?.();
+                  onClose();
+                }}
+                className="flex-1 rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 transition-colors"
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                  </svg>
+                  Fix Configuration
+                </span>
+              </button>
+              <button
+                onClick={onRetry}
+                disabled={isRetrying}
+                className="flex-1 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isRetrying ? "Resetting..." : "Reset & Retry"}
+              </button>
+              <button
+                onClick={onClose}
+                className="rounded bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300"
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onRetry}
+                disabled={isRetrying}
+                className="flex-1 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isRetrying ? "Retrying..." : "Retry Order"}
+              </button>
+              <button
+                onClick={onClose}
+                className="rounded bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300"
+              >
+                Close
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -146,7 +251,7 @@ function ErrorDetailsModal({
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<View>("orders");
+  const [viewState, setViewState] = useState<ViewState>({ view: "orders" });
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -155,11 +260,22 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState<'pending' | 'all'>('pending');
   const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
+  const [retryingOrders, setRetryingOrders] = useState<Set<string>>(new Set());
   const [errorModalOrder, setErrorModalOrder] = useState<Order | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
+  // Find configuration errors for banner
+  const configErrorOrders = orders.filter(o => 
+    o.status === 'error' && o.errorMessage?.startsWith('CONFIG_ERROR:')
+  );
+  
+  // Show banner if there are config errors and it hasn't been dismissed
+  const showConfigBanner = configErrorOrders.length > 0 && !bannerDismissed;
+
   const fetchOrders = async (term: string, mode: 'pending' | 'all') => {
+    console.log('Refetching orders...', { term, mode });
     const trimmedTerm = term.trim();
     setLoading(true);
     setSearching(Boolean(trimmedTerm));
@@ -175,7 +291,11 @@ export default function App() {
         `${API_URL}/orders?limit=50&offset=0${searchParam}${statusParam}${customFieldParam}`
       );
       const data = await response.json();
+      console.log('Orders refreshed:', data.items?.length || 0, 'orders');
       setOrders(data.items ?? []);
+      
+      // Reset banner dismissal when orders refresh (new config errors might have appeared)
+      setBannerDismissed(false);
     } finally {
       setLoading(false);
       setSearching(false);
@@ -209,6 +329,8 @@ export default function App() {
   };
 
   const handleLightburn = async (orderId: string) => {
+    console.log('handleLightburn called for order:', orderId);
+    
     // Mark order as processing in local state for UI feedback
     setProcessingOrders(prev => new Set(prev).add(orderId));
     
@@ -226,6 +348,8 @@ export default function App() {
         method: "POST"
       });
       const data = await response.json();
+      
+      console.log('LightBurn response:', { ok: response.ok, status: response.status, data });
       
       if (response.ok) {
         // Update to 'printed' status on success
@@ -271,7 +395,7 @@ export default function App() {
         setTimeout(() => setToast(null), 6000);
       }
     } catch (error) {
-      console.error(error);
+      console.error('LightBurn request failed:', error);
       
       // Update to 'error' status on network failure
       setOrders(prevOrders => 
@@ -294,7 +418,97 @@ export default function App() {
         next.delete(orderId);
         return next;
       });
+      
+      // ALWAYS refresh orders after request completes to ensure UI shows server state
+      console.log('Refreshing orders after LightBurn operation...');
+      await fetchOrders(searchTerm, filterMode);
     }
+  };
+
+  const handleRetry = async (orderId: string) => {
+    console.log('handleRetry called for order:', orderId);
+    
+    // Mark order as retrying for UI feedback
+    setRetryingOrders(prev => new Set(prev).add(orderId));
+    
+    // Optimistically update status to 'pending'
+    setOrders(prevOrders => 
+      prevOrders.map(order => 
+        order.orderId === orderId 
+          ? { ...order, status: 'pending' as const, errorMessage: null, attemptCount: 0 }
+          : order
+      )
+    );
+    
+    try {
+      const response = await fetch(`${API_URL}/orders/${orderId}/retry`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      
+      console.log('Retry response:', { ok: response.ok, status: response.status, data });
+      
+      if (response.ok) {
+        // Update with the server response
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { ...order, ...data.order }
+              : order
+          )
+        );
+        
+        setToast({ 
+          message: `Order ${orderId} reset successfully. Ready to retry.`,
+          type: 'success'
+        });
+        setTimeout(() => setToast(null), 4000);
+        
+        // Refresh the order list to ensure consistency
+        console.log('Refreshing orders after retry...');
+        await fetchOrders(searchTerm, filterMode);
+      } else {
+        // Revert optimistic update on failure - refetch to get accurate state
+        console.log('Retry failed, refetching orders...');
+        await fetchOrders(searchTerm, filterMode);
+        
+        setToast({ 
+          message: data.error || 'Failed to retry order',
+          type: 'error'
+        });
+        setTimeout(() => setToast(null), 6000);
+      }
+    } catch (error) {
+      console.error('Retry request failed:', error);
+      
+      // Revert optimistic update on network failure
+      await fetchOrders(searchTerm, filterMode);
+      
+      setToast({ 
+        message: "Network error: Failed to retry order",
+        type: 'error'
+      });
+      setTimeout(() => setToast(null), 6000);
+    } finally {
+      // Remove retrying state
+      setRetryingOrders(prev => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+    }
+  };
+
+  const handleFixConfig = (order: Order) => {
+    console.log('handleFixConfig called for order:', order.orderId);
+    
+    // Extract SKU info for Settings hint
+    const errorMsg = order.errorMessage?.replace('CONFIG_ERROR: ', '') || '';
+    const skuMatch = errorMsg.match(/SKU[:\s]+['"]([^'"]+)['"]/i);
+    const problematicSku = skuMatch ? skuMatch[1] : order.sku;
+    
+    // Navigate to Settings with the problematic SKU
+    setViewState({ view: 'settings', suggestedSku: problematicSku });
   };
 
   useEffect(() => {
@@ -313,8 +527,8 @@ export default function App() {
     : orders;
 
   // If on Settings view, render the Settings component
-  if (currentView === "settings") {
-    return <Settings onBack={() => setCurrentView("orders")} />;
+  if (viewState.view === "settings") {
+    return <Settings onBack={() => setViewState({ view: "orders" })} suggestedSku={viewState.suggestedSku} />;
   }
 
   // Otherwise render the Orders view
@@ -331,7 +545,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <button
               className="rounded bg-slate-600 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-              onClick={() => setCurrentView("settings")}
+              onClick={() => setViewState({ view: "settings" })}
               title="Settings"
             >
               <svg
@@ -364,6 +578,48 @@ export default function App() {
               : 'border-emerald-200 bg-emerald-50 text-emerald-700'
           }`}>
             {toast.message}
+          </div>
+        )}
+
+        {/* Configuration Error Banner */}
+        {showConfigBanner && (
+          <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 animate-fadeIn">
+            <div className="flex items-start gap-3">
+              <svg className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-orange-900 mb-1">
+                  Configuration Required
+                </h3>
+                {configErrorOrders.map((order) => {
+                  const errorMsg = order.errorMessage?.replace('CONFIG_ERROR: ', '') || '';
+                  const skuMatch = errorMsg.match(/SKU[:\s]+['"]([^'"]+)['"]/i);
+                  const sku = skuMatch ? skuMatch[1] : order.sku;
+                  
+                  return (
+                    <div key={order.id} className="text-sm text-orange-800 mb-2">
+                      <strong>Order {order.orderId}</strong>: No template found for SKU '<span className="font-mono">{sku}</span>'.{' '}
+                      <button
+                        onClick={() => handleFixConfig(order)}
+                        className="underline hover:text-orange-900 font-medium"
+                      >
+                        Click here to add a template rule in Settings
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setBannerDismissed(true)}
+                className="text-orange-400 hover:text-orange-600 flex-shrink-0 transition-colors"
+                title="Dismiss banner"
+              >
+                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
 
@@ -469,15 +725,41 @@ export default function App() {
                         );
                       }
 
-                      // Error state - show Retry button
+                      // Error state - check if it's a configuration error
                       if (isError) {
+                        const isConfigError = order.errorMessage?.startsWith('CONFIG_ERROR:');
+                        const isRetrying = retryingOrders.has(order.orderId);
+                        
+                        if (isConfigError) {
+                          return (
+                            <div className="flex gap-1.5">
+                              <button
+                                className="rounded bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 transition-colors"
+                                onClick={() => handleFixConfig(order)}
+                                title="Open Settings to add template rule"
+                              >
+                                Fix Config
+                              </button>
+                              <button
+                                className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                onClick={() => handleRetry(order.orderId)}
+                                disabled={isRetrying}
+                                title={isRetrying ? "Resetting order..." : "Reset order to retry after fixing config"}
+                              >
+                                {isRetrying ? "Resetting..." : "Reset & Retry"}
+                              </button>
+                            </div>
+                          );
+                        }
+                        
                         return (
                           <button
-                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
-                            onClick={() => handleLightburn(order.orderId)}
-                            title="Retry failed order"
+                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            onClick={() => handleRetry(order.orderId)}
+                            disabled={isRetrying}
+                            title={isRetrying ? "Retrying order..." : "Reset and retry failed order"}
                           >
-                            Retry
+                            {isRetrying ? "Retrying..." : "Retry"}
                           </button>
                         );
                       }
@@ -564,9 +846,13 @@ export default function App() {
           order={errorModalOrder}
           onClose={() => setErrorModalOrder(null)}
           onRetry={() => {
-            handleLightburn(errorModalOrder.orderId);
+            handleRetry(errorModalOrder.orderId);
             setErrorModalOrder(null);
           }}
+          onFixConfig={() => {
+            handleFixConfig(errorModalOrder);
+          }}
+          isRetrying={retryingOrders.has(errorModalOrder.orderId)}
         />
       )}
     </div>

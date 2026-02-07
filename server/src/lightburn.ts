@@ -386,7 +386,7 @@ export async function generateLightBurnProject(
     const matchedTemplate = await findTemplateForSku(order.sku);
     
     if (!matchedTemplate) {
-      const error = new Error(`NO_TEMPLATE_MATCH: No template rule found for SKU: ${order.sku || "(null)"}`);
+      const error = new Error("NO_TEMPLATE_MATCH: No template found for SKU '" + (order.sku || "(none)") + "'");
       logError(error, { orderId: order.orderId, sku: order.sku });
       throw error;
     }
