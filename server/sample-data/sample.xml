@@ -2,31 +2,43 @@
   <Order>
     <ID>XML-1</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela</Buyer>
+    <Custom>Name: Marco, Color: Silver, Image: Hearth</Custom>
+    <Buyer>Giulia</Buyer>
   </Order>
   <Order>
     <ID>XML-2</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela</Buyer>
+    <Custom>Name: Sofia, Color: Gold, Image: Zampa</Custom>
+    <Buyer>Lorenzo</Buyer>
   </Order>
   <Order>
     <ID>XML-3</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela</Buyer>
+    <Custom>Name: Matteo, Color: Black, Image: Hearth</Custom>
+    <Buyer>Francesca</Buyer>
   </Order>
   <Order>
     <ID>XML-4</ID>
     <SKU>LSR-MARK-04</SKU>
-    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela</Buyer>
+    <Custom>Name: Luna, Color: Rose Gold, Image: Zampa</Custom>
+    <Buyer>Alessandro</Buyer>
   </Order>
   <Order>
     <ID>XML-5</ID>
     <SKU>LSR-MARK-03</SKU>
-    <Custom>Name: New, Color: Silver, Image: Hearth</Custom>
-    <Buyer>Angela</Buyer>
+    <Custom>Name: Emma, Color: Blue, Image: Zampa</Custom>
+    <Buyer>Chiara</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-6</ID>
+    <SKU>LSR-MARK-03</SKU>
+    <Custom>Name: Leonardo, Color: Red, Image: Hearth</Custom>
+    <Buyer>Martina</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-7</ID>
+    <SKU>LSR-MARK-03</SKU>
+    <Custom>Name: Luca, Color: Green, Image: Zampa</Custom>
+    <Buyer>Davide</Buyer>
   </Order>
 </Orders>

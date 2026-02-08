@@ -5,7 +5,7 @@ import fastifyStatic from "@fastify/static";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, like, ne, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
 import { orders, templateRules, assetRules, Order } from "./schema.js";
@@ -150,10 +150,11 @@ app.get("/orders", async (request) => {
     offset: z.coerce.number().int().min(0).default(0),
     search: z.string().optional(),
     hasCustomField: z.coerce.boolean().optional(),
-    status: z.enum(["pending", "processing", "printed", "error"]).optional()
+    status: z.enum(["pending", "processing", "printed", "error"]).optional(),
+    excludeStatus: z.enum(["pending", "processing", "printed", "error"]).optional()
   });
 
-  const { limit, offset, search, hasCustomField, status } = querySchema.parse(
+  const { limit, offset, search, hasCustomField, status, excludeStatus } = querySchema.parse(
     request.query ?? {}
   );
 
@@ -172,6 +173,11 @@ app.get("/orders", async (request) => {
   if (status) {
     // With the new enum-based status, filter by exact match
     conditions.push(eq(orders.status, status));
+  }
+
+  if (excludeStatus) {
+    // Filter out orders with this status
+    conditions.push(ne(orders.status, excludeStatus));
   }
 
   const where = conditions.length ? and(...conditions) : undefined;

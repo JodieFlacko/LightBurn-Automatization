@@ -296,7 +296,7 @@ export default function App() {
   const [processingRetroOrders, setProcessingRetroOrders] = useState<Set<string>>(new Set());
   const [errorModalOrder, setErrorModalOrder] = useState<Order | null>(null);
   const [errorModalSide, setErrorModalSide] = useState<'front' | 'retro' | null>(null);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [isConfigListOpen, setIsConfigListOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
@@ -306,8 +306,8 @@ export default function App() {
     (o.retroStatus === 'error' && o.retroErrorMessage?.startsWith('CONFIG_ERROR:'))
   );
   
-  // Show banner if there are config errors and it hasn't been dismissed
-  const showConfigBanner = configErrorOrders.length > 0 && !bannerDismissed;
+  // Show banner if there are config errors
+  const showConfigBanner = configErrorOrders.length > 0;
 
   const fetchOrders = async (term: string, mode: 'pending' | 'all') => {
     console.log('Refetching orders...', { term, mode });
@@ -319,7 +319,8 @@ export default function App() {
         ? `&search=${encodeURIComponent(trimmedTerm)}`
         : "";
       // If user is searching, ignore filter and search all history
-      const statusParam = trimmedTerm ? "" : (mode === 'pending' ? '&status=pending' : '');
+      // For "To Do" mode, exclude 'printed' orders to show pending, processing, and error
+      const statusParam = trimmedTerm ? "" : (mode === 'pending' ? '&excludeStatus=printed' : '');
       // Only show orders with customizations in "To Do" mode
       const customFieldParam = (!trimmedTerm && mode === 'pending') ? '&hasCustomField=true' : '';
       const response = await fetch(
@@ -328,9 +329,6 @@ export default function App() {
       const data = await response.json();
       console.log('Orders refreshed:', data.items?.length || 0, 'orders');
       setOrders(data.items ?? []);
-      
-      // Reset banner dismissal when orders refresh (new config errors might have appeared)
-      setBannerDismissed(false);
     } finally {
       setLoading(false);
       setSearching(false);
@@ -664,6 +662,301 @@ export default function App() {
       ]
     : orders;
 
+  // Split orders into rework and new categories (only for "To Do" view)
+  const isReworkOrder = (order: Order) => {
+    return Boolean(
+      order.processedAt || 
+      order.fronteProcessedAt || 
+      order.retroProcessedAt
+    );
+  };
+
+  const reworkOrders = filterMode === 'pending' 
+    ? displayedOrders.filter(isReworkOrder)
+    : [];
+  const newOrders = filterMode === 'pending'
+    ? displayedOrders.filter(order => !isReworkOrder(order))
+    : [];
+
+  // Reusable table row renderer
+  const renderOrderRow = (order: Order) => {
+    const isExactMatch =
+      activeSearchTerm.length > 0 &&
+      order.orderId === activeSearchTerm;
+    const isProcessing = order.status === 'processing';
+    const isPrinted = order.status === 'printed';
+    const isError = order.status === 'error';
+    const hasCustomField = Boolean(order.customField && order.customField.trim());
+    
+    // Row background: amber for exact match, dim for both sides printed, white for pending
+    const bothSidesPrinted = order.fronteStatus === 'printed' && 
+      (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
+    const rowClassName = isExactMatch 
+      ? "bg-amber-50 transition-colors duration-200" 
+      : bothSidesPrinted
+      ? "bg-slate-50 opacity-50 transition-opacity duration-200"
+      : "transition-colors duration-200";
+
+    // Calculate single overall status for the order (priority-based)
+    const getOverallStatus = () => {
+      // Priority 1: Check for errors (any side)
+      const fronteHasError = order.fronteStatus === 'error';
+      const retroHasError = order.retroStatus === 'error';
+      
+      if (fronteHasError || retroHasError) {
+        // Check if it's a config error
+        const isConfigError = 
+          (fronteHasError && order.fronteErrorMessage?.startsWith('CONFIG_ERROR:')) ||
+          (retroHasError && order.retroErrorMessage?.startsWith('CONFIG_ERROR:'));
+        
+        const errorMessage = fronteHasError ? order.fronteErrorMessage : order.retroErrorMessage;
+        
+        if (isConfigError) {
+          return (
+            <button
+              onClick={() => {
+                setErrorModalOrder(order);
+                setErrorModalSide(fronteHasError ? 'front' : 'retro');
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700 transition-colors hover:bg-orange-200"
+              title="Configuration error - click for details"
+            >
+              <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              Config Error
+            </button>
+          );
+        }
+        
+        return (
+          <button
+            onClick={() => {
+              setErrorModalOrder(order);
+              setErrorModalSide(fronteHasError ? 'front' : 'retro');
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-200"
+            title="Error - click for details"
+          >
+            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            Error
+          </button>
+        );
+      }
+
+      // Priority 2: Check for processing (any side)
+      if (order.fronteStatus === 'processing' || order.retroStatus === 'processing') {
+        return (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+            Processing
+          </span>
+        );
+      }
+
+      // Priority 3: Check for partial completion (at least one side printed, but not both)
+      const frontePrinted = order.fronteStatus === 'printed';
+      const retroPrintedOrNotRequired = order.retroStatus === 'printed' || order.retroStatus === 'not_required';
+      
+      if (frontePrinted && retroPrintedOrNotRequired) {
+        // Both sides complete
+        return (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            Complete
+          </span>
+        );
+      } else if (frontePrinted || (order.retroStatus === 'printed')) {
+        // Partial completion
+        return (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-11a1 1 0 112 0v3.586l1.707 1.707a1 1 0 01-1.414 1.414l-2-2A1 1 0 019 11V7z" clipRule="evenodd" />
+            </svg>
+            Partial
+          </span>
+        );
+      }
+
+      // Priority 4: Pending (default)
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+          <span className="h-2 w-2 rounded-full bg-slate-400"></span>
+          Pending
+        </span>
+      );
+    };
+    
+    // Determine button appearance based on side status
+    const getSideActionButton = (
+      side: 'front' | 'retro',
+      sideStatus: 'pending' | 'processing' | 'printed' | 'error' | 'not_required',
+      sideErrorMessage: string | null | undefined,
+      sideAttemptCount: number | undefined
+    ) => {
+      // Retro not required - show N/A
+      if (side === 'retro' && sideStatus === 'not_required') {
+        return <span className="text-slate-400">N/A</span>;
+      }
+
+      if (!hasCustomField) {
+        return <span className="text-slate-400">-</span>;
+      }
+
+      const processingSet = side === 'front' ? processingFronteOrders : processingRetroOrders;
+      const isProcessingSide = processingSet.has(order.orderId);
+
+      // Disable button when processing this side
+      if (sideStatus === 'processing' || isProcessingSide) {
+        return (
+          <button
+            className="rounded bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 cursor-not-allowed opacity-60"
+            disabled
+            title={`${side === 'front' ? 'Front' : 'Retro'} side is being processed`}
+          >
+            Processing...
+          </button>
+        );
+      }
+
+      // Error state - check if it's a configuration error
+      if (sideStatus === 'error') {
+        const isConfigError = sideErrorMessage?.startsWith('CONFIG_ERROR:');
+        
+        if (isConfigError) {
+          return (
+            <button
+              className="rounded bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 transition-colors"
+              onClick={() => {
+                setErrorModalOrder(order);
+                setErrorModalSide(side);
+              }}
+              title="Configuration error - click for details"
+            >
+              Fix Config
+            </button>
+          );
+        }
+        
+        return (
+          <button
+            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+            onClick={() => {
+              setErrorModalOrder(order);
+              setErrorModalSide(side);
+            }}
+            title="Error - click to retry"
+          >
+            Retry
+          </button>
+        );
+      }
+
+      // Printed state - show Resend button with warning color
+      if (sideStatus === 'printed') {
+        return (
+          <button
+            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+            onClick={() => handleSideProcessing(order.orderId, side)}
+            title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
+          >
+            Resend
+          </button>
+        );
+      }
+
+      // Pending state - show primary button
+      return (
+        <button
+          className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+          onClick={() => handleSideProcessing(order.orderId, side)}
+          title={`Process ${side === 'front' ? 'front' : 'retro'} side`}
+        >
+          Send to LightBurn
+        </button>
+      );
+    };
+    
+    return (
+      <tr
+        key={order.id}
+        className={rowClassName}
+      >
+        <td className="px-4 py-3 font-medium text-slate-700 w-32">
+          {order.orderId}
+        </td>
+        <td className="px-4 py-3 text-slate-600 w-32">
+          {order.sku ?? "-"}
+        </td>
+        <td className="px-4 py-3 text-slate-600 w-48">
+          {hasCustomField ? (
+            order.customField
+          ) : (
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
+              Standard Order
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3 w-20">
+          {order.detectedColor ? (
+            <div className="flex items-center gap-2">
+              <div 
+                className="h-6 w-6 rounded-full border-2 border-slate-300"
+                style={{ backgroundColor: order.detectedColor }}
+                title={order.detectedColor}
+              />
+            </div>
+          ) : (
+            <span className="text-slate-400">-</span>
+          )}
+        </td>
+        <td className="px-4 py-3 whitespace-nowrap w-32">
+          <div className="flex items-center justify-center">
+            {getOverallStatus()}
+          </div>
+        </td>
+        <td className="px-4 py-3 whitespace-nowrap w-44">
+          <div className="flex items-center">
+            {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount)}
+          </div>
+        </td>
+        <td className="px-4 py-3 whitespace-nowrap w-44">
+          <div className="flex items-center">
+            {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount)}
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
+  // Reusable table header
+  const renderTableHeader = () => (
+    <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+      <tr>
+        <th className="px-4 py-3 whitespace-nowrap w-32">Order ID</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32">SKU</th>
+        <th className="px-4 py-3 whitespace-nowrap w-48">Custom Field</th>
+        <th className="px-4 py-3 whitespace-nowrap w-20">Color</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32">Status</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44">Action Fronte</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44">Action Retro</th>
+      </tr>
+    </thead>
+  );
+
+  // Reusable empty state
+  const renderEmptyState = (message: string) => (
+    <tr>
+      <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+        {message}
+      </td>
+    </tr>
+  );
+
   // If on Settings view, render the Settings component
   if (viewState.view === "settings") {
     return <Settings onBack={() => setViewState({ view: "orders" })} suggestedSku={viewState.suggestedSku} />;
@@ -719,23 +1012,38 @@ export default function App() {
           </div>
         )}
 
-        {/* Configuration Error Banner */}
+        {/* Configuration Error Banner - Collapsible */}
         {showConfigBanner && (
-          <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 animate-fadeIn">
-            <div className="flex items-start gap-3">
-              <svg className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <div className="rounded-lg border border-orange-200 bg-orange-50 overflow-hidden animate-fadeIn">
+            {/* Collapsed Summary Bar */}
+            <button
+              onClick={() => setIsConfigListOpen(!isConfigListOpen)}
+              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-orange-100 transition-colors"
+            >
+              <svg className="h-5 w-5 text-orange-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-orange-900 mb-1">
-                  Configuration Required
-                </h3>
+              <span className="flex-1 text-left text-sm font-semibold text-orange-900">
+                <strong>{configErrorOrders.length}</strong> {configErrorOrders.length === 1 ? 'Order requires' : 'Orders require'} configuration
+              </span>
+              <svg 
+                className={`h-5 w-5 text-orange-600 flex-shrink-0 transition-transform ${isConfigListOpen ? 'rotate-180' : ''}`} 
+                fill="currentColor" 
+                viewBox="0 0 20 20"
+              >
+                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+
+            {/* Expanded Details List */}
+            {isConfigListOpen && (
+              <div className="border-t border-orange-200 px-4 py-3 space-y-3">
                 {configErrorOrders.map((order) => {
                   const fronteHasError = order.fronteStatus === 'error' && order.fronteErrorMessage?.startsWith('CONFIG_ERROR:');
                   const retroHasError = order.retroStatus === 'error' && order.retroErrorMessage?.startsWith('CONFIG_ERROR:');
                   
                   return (
-                    <div key={order.id} className="text-sm text-orange-800 mb-2">
+                    <div key={order.id} className="text-sm text-orange-800">
                       <strong>Order {order.orderId}</strong>:{' '}
                       {fronteHasError && (
                         <>
@@ -757,16 +1065,7 @@ export default function App() {
                   );
                 })}
               </div>
-              <button
-                onClick={() => setBannerDismissed(true)}
-                className="text-orange-400 hover:text-orange-600 flex-shrink-0 transition-colors"
-                title="Dismiss banner"
-              >
-                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </div>
+            )}
           </div>
         )}
 
@@ -809,209 +1108,72 @@ export default function App() {
               )}
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Order ID</th>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Custom Field</th>
-                  <th className="px-4 py-3">Color</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Action Fronte</th>
-                  <th className="px-4 py-3">Action Retro</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                      <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
-                          Loading...
-                        </td>
-                      </tr>
-                    ) : displayedOrders.length === 0 ? (
-                      <tr>
-                        <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
-                          {activeSearchTerm
-                            ? `No orders found for ${activeSearchTerm}.`
-                            : "No orders found."}
-                        </td>
-                      </tr>
-                    ) : (
-                  displayedOrders.map((order) => {
-                    const isExactMatch =
-                      activeSearchTerm.length > 0 &&
-                      order.orderId === activeSearchTerm;
-                    const isProcessing = order.status === 'processing';
-                    const isPrinted = order.status === 'printed';
-                    const isError = order.status === 'error';
-                    const hasCustomField = Boolean(order.customField && order.customField.trim());
-                    
-                    // Row background: amber for exact match, dim for both sides printed, white for pending
-                    const bothSidesPrinted = order.fronteStatus === 'printed' && 
-                      (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
-                    const rowClassName = isExactMatch 
-                      ? "bg-amber-50 transition-colors duration-200" 
-                      : bothSidesPrinted
-                      ? "bg-slate-50 opacity-50 transition-opacity duration-200"
-                      : "transition-colors duration-200";
-                    
-                    // Determine button appearance based on side status
-                    const getSideActionButton = (
-                      side: 'front' | 'retro',
-                      sideStatus: 'pending' | 'processing' | 'printed' | 'error' | 'not_required',
-                      sideErrorMessage: string | null | undefined,
-                      sideAttemptCount: number | undefined
-                    ) => {
-                      // Retro not required - show N/A
-                      if (side === 'retro' && sideStatus === 'not_required') {
-                        return <span className="text-slate-400">N/A</span>;
-                      }
 
-                      if (!hasCustomField) {
-                        return <span className="text-slate-400">-</span>;
-                      }
+          {/* For "To Do" mode with split categories */}
+          {filterMode === 'pending' && (reworkOrders.length > 0 || newOrders.length > 0) ? (
+            <div className="divide-y divide-slate-200">
+              {/* Rework / Attention Needed Section */}
+              {reworkOrders.length > 0 && (
+                <div>
+                  <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-amber-900">
+                      Rework / Attention Needed ({reworkOrders.length})
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      {renderTableHeader()}
+                      <tbody className="divide-y divide-slate-100">
+                        {reworkOrders.map(renderOrderRow)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
-                      const processingSet = side === 'front' ? processingFronteOrders : processingRetroOrders;
-                      const isProcessingSide = processingSet.has(order.orderId);
-
-                      // Disable button when processing this side
-                      if (sideStatus === 'processing' || isProcessingSide) {
-                        return (
-                          <button
-                            className="rounded bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 cursor-not-allowed opacity-60"
-                            disabled
-                            title={`${side === 'front' ? 'Front' : 'Retro'} side is being processed`}
-                          >
-                            Processing...
-                          </button>
-                        );
-                      }
-
-                      // Error state - check if it's a configuration error
-                      if (sideStatus === 'error') {
-                        const isConfigError = sideErrorMessage?.startsWith('CONFIG_ERROR:');
-                        
-                        if (isConfigError) {
-                          return (
-                            <button
-                              className="rounded bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 transition-colors"
-                              onClick={() => {
-                                setErrorModalOrder(order);
-                                setErrorModalSide(side);
-                              }}
-                              title="Configuration error - click for details"
-                            >
-                              Fix Config
-                            </button>
-                          );
-                        }
-                        
-                        return (
-                          <button
-                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
-                            onClick={() => {
-                              setErrorModalOrder(order);
-                              setErrorModalSide(side);
-                            }}
-                            title="Error - click to retry"
-                          >
-                            Retry
-                          </button>
-                        );
-                      }
-
-                      // Printed state - show Resend button with warning color
-                      if (sideStatus === 'printed') {
-                        return (
-                          <button
-                            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
-                            onClick={() => handleSideProcessing(order.orderId, side)}
-                            title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
-                          >
-                            Resend
-                          </button>
-                        );
-                      }
-
-                      // Pending state - show primary button
-                      return (
-                        <button
-                          className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
-                          onClick={() => handleSideProcessing(order.orderId, side)}
-                          title={`Process ${side === 'front' ? 'front' : 'retro'} side`}
-                        >
-                          Send to LightBurn
-                        </button>
-                      );
-                    };
-                    
-                    return (
-                      <tr
-                        key={order.id}
-                        className={rowClassName}
-                      >
-                        <td className="px-4 py-3 font-medium text-slate-700">
-                          {order.orderId}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {order.sku ?? "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {hasCustomField ? (
-                            order.customField
-                          ) : (
-                            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
-                              Standard Order
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {order.detectedColor ? (
-                            <div className="flex items-center gap-2">
-                              <div 
-                                className="h-6 w-6 rounded-full border-2 border-slate-300"
-                                style={{ backgroundColor: order.detectedColor }}
-                                title={order.detectedColor}
-                              />
-                            </div>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <SideStatusBadge 
-                              status={order.fronteStatus}
-                              errorMessage={order.fronteErrorMessage}
-                              onErrorClick={() => {
-                                setErrorModalOrder(order);
-                                setErrorModalSide('front');
-                              }}
-                            />
-                            <SideStatusBadge 
-                              status={order.retroStatus}
-                              errorMessage={order.retroErrorMessage}
-                              onErrorClick={() => {
-                                setErrorModalOrder(order);
-                                setErrorModalSide('retro');
-                              }}
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount)}
-                        </td>
-                        <td className="px-4 py-3">
-                          {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount)}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+              {/* New Orders Section */}
+              {newOrders.length > 0 && (
+                <div>
+                  <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center gap-2">
+                    <svg className="h-4 w-4 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-slate-700">
+                      New Orders ({newOrders.length})
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      {renderTableHeader()}
+                      <tbody className="divide-y divide-slate-100">
+                        {newOrders.map(renderOrderRow)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Single unified table for "All History" or empty/loading states */
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                {renderTableHeader()}
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    renderEmptyState("Loading...")
+                  ) : displayedOrders.length === 0 ? (
+                    renderEmptyState(
+                      activeSearchTerm
+                        ? `No orders found for ${activeSearchTerm}.`
+                        : "No orders found."
+                    )
+                  ) : (
+                    displayedOrders.map(renderOrderRow)
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </div>
 
