@@ -297,6 +297,8 @@ export default function App() {
   const [errorModalOrder, setErrorModalOrder] = useState<Order | null>(null);
   const [errorModalSide, setErrorModalSide] = useState<'front' | 'retro' | null>(null);
   const [isConfigListOpen, setIsConfigListOpen] = useState(false);
+  const [isReworkOpen, setIsReworkOpen] = useState(false);
+  const [discardConfirmOrder, setDiscardConfirmOrder] = useState<Order | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
@@ -647,6 +649,59 @@ export default function App() {
     setViewState({ view: 'settings', suggestedSku: problematicSku });
   };
 
+  const handleDiscardReprint = async (orderId: string) => {
+    console.log('handleDiscardReprint called for order:', orderId);
+    
+    try {
+      // Reset both sides to 'printed' status to remove from rework queue
+      const response = await fetch(`${API_URL}/orders/${orderId}/discard-reprint`, {
+        method: "POST"
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Update local state to reflect the change
+        setOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.orderId === orderId 
+              ? { 
+                  ...order, 
+                  fronteStatus: 'printed' as const,
+                  retroStatus: order.retroStatus === 'not_required' ? ('not_required' as const) : ('printed' as const),
+                  fronteErrorMessage: null,
+                  retroErrorMessage: null
+                }
+              : order
+          )
+        );
+        
+        setToast({ 
+          message: `Order ${orderId} moved back to history.`,
+          type: 'success'
+        });
+        setTimeout(() => setToast(null), 4000);
+        
+        // Refresh orders to ensure consistency
+        await fetchOrders(searchTerm, filterMode);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        setToast({ 
+          message: data.error || 'Failed to discard reprint',
+          type: 'error'
+        });
+        setTimeout(() => setToast(null), 6000);
+      }
+    } catch (error) {
+      console.error('Discard reprint request failed:', error);
+      setToast({ 
+        message: "Network error: Failed to discard reprint",
+        type: 'error'
+      });
+      setTimeout(() => setToast(null), 6000);
+    }
+  };
+
   useEffect(() => {
     fetchOrders(debouncedSearchTerm, filterMode);
   }, [debouncedSearchTerm, filterMode]);
@@ -678,8 +733,8 @@ export default function App() {
     ? displayedOrders.filter(order => !isReworkOrder(order))
     : [];
 
-  // Reusable table row renderer
-  const renderOrderRow = (order: Order) => {
+  // Reusable table row renderer with optional discard column
+  const renderOrderRow = (order: Order, showDiscardColumn: boolean = false) => {
     const isExactMatch =
       activeSearchTerm.length > 0 &&
       order.orderId === activeSearchTerm;
@@ -886,13 +941,13 @@ export default function App() {
         key={order.id}
         className={rowClassName}
       >
-        <td className="px-4 py-3 font-medium text-slate-700 w-32">
+        <td className="px-4 py-3 font-medium text-slate-700 w-32 text-left align-middle">
           {order.orderId}
         </td>
-        <td className="px-4 py-3 text-slate-600 w-32">
+        <td className="px-4 py-3 text-slate-600 w-32 text-left align-middle">
           {order.sku ?? "-"}
         </td>
-        <td className="px-4 py-3 text-slate-600 w-48">
+        <td className="px-4 py-3 text-slate-600 w-48 text-left align-middle">
           {hasCustomField ? (
             order.customField
           ) : (
@@ -901,57 +956,80 @@ export default function App() {
             </span>
           )}
         </td>
-        <td className="px-4 py-3 w-20">
-          {order.detectedColor ? (
-            <div className="flex items-center gap-2">
+        <td className="px-4 py-3 w-20 text-center align-middle">
+          <div className="flex items-center justify-center">
+            {order.detectedColor ? (
               <div 
                 className="h-6 w-6 rounded-full border-2 border-slate-300"
                 style={{ backgroundColor: order.detectedColor }}
                 title={order.detectedColor}
               />
-            </div>
-          ) : (
-            <span className="text-slate-400">-</span>
-          )}
+            ) : (
+              <span className="text-slate-400">-</span>
+            )}
+          </div>
         </td>
-        <td className="px-4 py-3 whitespace-nowrap w-32">
+        <td className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">
           <div className="flex items-center justify-center">
             {getOverallStatus()}
           </div>
         </td>
-        <td className="px-4 py-3 whitespace-nowrap w-44">
-          <div className="flex items-center">
+        <td className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">
+          <div className="flex items-center justify-center">
             {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount)}
           </div>
         </td>
-        <td className="px-4 py-3 whitespace-nowrap w-44">
-          <div className="flex items-center">
+        <td className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">
+          <div className="flex items-center justify-center">
             {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount)}
           </div>
         </td>
+        {showDiscardColumn && (
+          <td className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">
+            <div className="flex items-center justify-center">
+              {(order.fronteStatus === 'error' || order.retroStatus === 'error') ? (
+                <button
+                  onClick={() => setDiscardConfirmOrder(order)}
+                  className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  title="Cancel reprint and move back to history"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Discard
+                </button>
+              ) : (
+                <span className="text-slate-300">-</span>
+              )}
+            </div>
+          </td>
+        )}
       </tr>
     );
   };
 
-  // Reusable table header
-  const renderTableHeader = () => (
-    <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+  // Reusable table header with optional discard column
+  const renderTableHeader = (showDiscardColumn: boolean = false) => (
+    <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
       <tr>
-        <th className="px-4 py-3 whitespace-nowrap w-32">Order ID</th>
-        <th className="px-4 py-3 whitespace-nowrap w-32">SKU</th>
-        <th className="px-4 py-3 whitespace-nowrap w-48">Custom Field</th>
-        <th className="px-4 py-3 whitespace-nowrap w-20">Color</th>
-        <th className="px-4 py-3 whitespace-nowrap w-32">Status</th>
-        <th className="px-4 py-3 whitespace-nowrap w-44">Action Fronte</th>
-        <th className="px-4 py-3 whitespace-nowrap w-44">Action Retro</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">Order ID</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">SKU</th>
+        <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Custom Field</th>
+        <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Color</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Status</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Fronte</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Retro</th>
+        {showDiscardColumn && (
+          <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Discard</th>
+        )}
       </tr>
     </thead>
   );
 
   // Reusable empty state
-  const renderEmptyState = (message: string) => (
+  const renderEmptyState = (message: string, showDiscardColumn: boolean = false) => (
     <tr>
-      <td className="px-4 py-4 text-center text-slate-500" colSpan={7}>
+      <td className="px-4 py-4 text-center text-slate-500 align-middle" colSpan={showDiscardColumn ? 8 : 7}>
         {message}
       </td>
     </tr>
@@ -1112,26 +1190,7 @@ export default function App() {
           {/* For "To Do" mode with split categories */}
           {filterMode === 'pending' && (reworkOrders.length > 0 || newOrders.length > 0) ? (
             <div className="divide-y divide-slate-200">
-              {/* Rework / Attention Needed Section */}
-              {reworkOrders.length > 0 && (
-                <div>
-                  <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-amber-900">
-                      Rework / Attention Needed ({reworkOrders.length})
-                    </h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm">
-                      {renderTableHeader()}
-                      <tbody className="divide-y divide-slate-100">
-                        {reworkOrders.map(renderOrderRow)}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* New Orders Section */}
+              {/* New Orders Section - Now First */}
               {newOrders.length > 0 && (
                 <div>
                   <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center gap-2">
@@ -1143,20 +1202,51 @@ export default function App() {
                     </h3>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                       {renderTableHeader()}
                       <tbody className="divide-y divide-slate-100">
-                        {newOrders.map(renderOrderRow)}
+                        {newOrders.map(order => renderOrderRow(order, false))}
                       </tbody>
                     </table>
                   </div>
+                </div>
+              )}
+
+              {/* Rework / Attention Needed Section - Now Second & Collapsible */}
+              {reworkOrders.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setIsReworkOpen(!isReworkOpen)}
+                    className="w-full bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 hover:bg-amber-100 transition-colors"
+                  >
+                    <svg 
+                      className={`h-4 w-4 text-amber-900 transition-transform ${isReworkOpen ? 'rotate-180' : ''}`}
+                      fill="currentColor" 
+                      viewBox="0 0 20 20"
+                    >
+                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-amber-900">
+                      Rework / Attention Needed ({reworkOrders.length})
+                    </h3>
+                  </button>
+                  {isReworkOpen && (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                        {renderTableHeader(true)}
+                        <tbody className="divide-y divide-slate-100">
+                          {reworkOrders.map(order => renderOrderRow(order, true))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           ) : (
             /* Single unified table for "All History" or empty/loading states */
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                 {renderTableHeader()}
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
@@ -1168,7 +1258,7 @@ export default function App() {
                         : "No orders found."
                     )
                   ) : (
-                    displayedOrders.map(renderOrderRow)
+                    displayedOrders.map(order => renderOrderRow(order, false))
                   )}
                 </tbody>
               </table>
@@ -1203,6 +1293,54 @@ export default function App() {
           }}
           isRetrying={false}
         />
+      )}
+
+      {/* Discard Reprint Confirmation Modal */}
+      {discardConfirmOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={() => setDiscardConfirmOrder(null)}>
+          <div className="max-w-md rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <h3 className="text-lg font-semibold text-slate-900">Discard Reprint</h3>
+              </div>
+              <button onClick={() => setDiscardConfirmOrder(null)} className="text-slate-400 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-sm text-slate-700">
+                Are you sure you want to stop reprinting <strong>{discardConfirmOrder.orderId}</strong> and move it back to history?
+              </p>
+              <p className="mt-2 text-sm text-slate-500">
+                This will not delete the order. It will simply mark it as complete and remove it from the "Rework" queue.
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  handleDiscardReprint(discardConfirmOrder.orderId);
+                  setDiscardConfirmOrder(null);
+                }}
+                className="flex-1 rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+              >
+                Yes, Discard
+              </button>
+              <button
+                onClick={() => setDiscardConfirmOrder(null)}
+                className="flex-1 rounded bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

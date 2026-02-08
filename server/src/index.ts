@@ -969,6 +969,99 @@ app.post("/orders/:orderId/retry", async (request, reply) => {
   };
 });
 
+// Discard reprint attempt endpoint
+app.post("/orders/:orderId/discard-reprint", async (request, reply) => {
+  const { orderId } = paramsSchema.parse(request.params);
+  logger.info({ orderId }, "Discard reprint requested");
+
+  // Find the order
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const order = rows[0];
+  if (!order) {
+    logger.warn({ orderId }, "Order not found for discard reprint");
+    reply.code(404);
+    return { error: "Order not found" };
+  }
+
+  logger.info(
+    { 
+      orderId, 
+      fronteStatus: order.fronteStatus, 
+      retroStatus: order.retroStatus,
+      hasProcessedAt: Boolean(order.fronteProcessedAt || order.retroProcessedAt)
+    },
+    "Order found, preparing to discard reprint"
+  );
+
+  // Validate that this is actually a rework order (has been processed before)
+  if (!order.fronteProcessedAt && !order.retroProcessedAt) {
+    logger.warn(
+      { orderId },
+      "Cannot discard reprint for order that has never been processed"
+    );
+    reply.code(400);
+    return {
+      error: "This order has never been processed. Only rework orders can be discarded.",
+      fronteStatus: order.fronteStatus,
+      retroStatus: order.retroStatus
+    };
+  }
+
+  // Reset both sides to 'printed' status (or keep 'not_required' for retro)
+  const updateResult = await db
+    .update(orders)
+    .set({
+      fronteStatus: 'printed',
+      retroStatus: order.retroStatus === 'not_required' ? 'not_required' : 'printed',
+      fronteErrorMessage: null,
+      retroErrorMessage: null,
+      fronteAttemptCount: 0,
+      retroAttemptCount: 0,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    })
+    .where(eq(orders.orderId, orderId))
+    .run();
+
+  if (updateResult.changes === 0) {
+    logger.error({ orderId }, "Failed to discard reprint");
+    reply.code(500);
+    return { error: "Failed to discard reprint" };
+  }
+
+  // Update overall order status
+  await updateOverallStatus(orderId);
+
+  // Fetch the updated order
+  const updatedRows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.orderId, orderId))
+    .limit(1);
+
+  const updatedOrder = updatedRows[0];
+
+  logger.info(
+    { 
+      orderId, 
+      fronteStatus: updatedOrder.fronteStatus, 
+      retroStatus: updatedOrder.retroStatus,
+      overallStatus: updatedOrder.status
+    },
+    "Reprint discarded successfully - order moved back to history"
+  );
+
+  return {
+    success: true,
+    message: "Reprint discarded successfully. Order moved back to history.",
+    order: updatedOrder
+  };
+});
+
 // Template Rules Management Endpoints
 
 app.get("/settings/rules", async () => {
