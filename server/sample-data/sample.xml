@@ -41,4 +41,22 @@
     <Custom>Name: Luca, Color: Green, Image: Zampa</Custom>
     <Buyer>Davide</Buyer>
   </Order>
+  <Order>
+    <ID>XML-8</ID>
+    <SKU>LSR-MARK-03</SKU>
+    <Custom>Name: Alice, Color: Pink, Image: Zampa</Custom>
+    <Buyer>Sara</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-9</ID>
+    <SKU>LSR-MARK-07</SKU>
+    <Custom>Name: Alice, Color: Pink, Image: Zampa</Custom>
+    <Buyer>Sara</Buyer>
+  </Order>
+  <Order>
+    <ID>XML-10</ID>
+    <SKU>LSR-MARK-07</SKU>
+    <Custom>Name: Alice, Color: Pink, Image: Zampa</Custom>
+    <Buyer>Sara</Buyer>
+  </Order>
 </Orders>
