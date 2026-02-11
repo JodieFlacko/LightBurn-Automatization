@@ -1,16 +1,54 @@
 import * as cheerio from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { exec, execFile } from "node:child_process";
+import { exec, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
 import { desc } from "drizzle-orm";
 import { logger, logError } from "./logger.js";
-import { config } from "./config.js";
+import { config, IS_WSL } from "./config.js";
 
 const execPromise = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+/**
+ * Normalize file path for Windows execution.
+ * Handles both WSL path conversion and native Windows path normalization.
+ * 
+ * @param filePath - The file path to normalize (WSL or Windows format)
+ * @returns Windows-formatted path (e.g., C:\Users\...)
+ */
+function normalizePathForWindows(filePath: string): string {
+  // WSL: Use wslpath to convert /mnt/c/... to C:\...
+  if (IS_WSL) {
+    try {
+      // FIX: execFileSync returns the string directly, not an object
+      const stdout = execFileSync('wslpath', ['-w', filePath], { 
+        encoding: 'utf-8' 
+      });
+      return stdout.trim();
+    } catch (error: any) {
+      throw new Error(`Failed to convert WSL path: ${error.message}`);
+    }
+  }
+  
+  // Native Windows: Normalize path separators
+  if (process.platform === 'win32') {
+    // Replace all forward slashes with backslashes
+    let normalized = filePath.replace(/\//g, '\\');
+    
+    // Ensure drive letter is uppercase (C:\ not c:\)
+    normalized = normalized.replace(/^([a-z]):/, (match, letter) => 
+      letter.toUpperCase() + ':'
+    );
+    
+    return normalized;
+  }
+  
+  // Fallback (shouldn't happen)
+  return filePath;
+}
 
 interface Order {
   orderId: string;
@@ -646,28 +684,16 @@ export async function generateLightBurnProject(
 
     // Launch LightBurn with path conversion for WSL compatibility
     try {
-      // Step 1: Convert path for Windows if running in WSL
-      let windowsPath = filePath;
-
-      if (process.platform === 'linux') {
-        // Use wslpath -w to convert /mnt/c/... to C:\...
-        const { stdout } = await execFileAsync('wslpath', ['-w', filePath]);
-        windowsPath = stdout.trim();
-        logger.info({ 
-          orderId: order.orderId, 
-          originalPath: filePath, 
-          windowsPath 
-        }, `Path converted for Windows: ${filePath} → ${windowsPath}`);
-      }
-
-      // Step 2: Launch LightBurn via Windows 'start' command
-      // The empty "" is the required window title parameter for the start command syntax
-      logger.info(
-        { orderId: order.orderId, windowsPath },
-        "Launching LightBurn with converted path"
-      );
-
-      await execFileAsync('cmd.exe', ['/c', 'start', '""', windowsPath]);
+      // Convert path to Windows format
+      const windowsPath = normalizePathForWindows(filePath);
+      logger.info({ 
+        orderId: order.orderId,
+        originalPath: filePath, 
+        windowsPath 
+      }, 'Path normalized for LightBurn launch');
+      
+      // Launch LightBurn
+      await execFileAsync('cmd.exe', ['/c', 'start', '', windowsPath]);
 
       logger.info(
         { orderId: order.orderId, windowsPath },

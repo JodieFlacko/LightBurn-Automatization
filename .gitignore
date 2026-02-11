@@ -27,3 +27,25 @@ server/public/
 
 # Cursor  
 .cursor/
+
+# Electron Builder / Distributables
+dist-electron/
+dist/
+release/
+
+# Native Modules (recompiled)
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS Generated Files
+.DS_Store
+.thumbs.db
+Thumbs.db

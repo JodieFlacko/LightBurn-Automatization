@@ -1,18 +1,70 @@
 {
   "name": "amazon-orders-feed-importer",
+  "version": "1.0.0",
+  "description": "Victoria Laser Automation App",
+  "author": "Victoria Laser",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "pnpm -r dev",
     "build": "pnpm --filter web build && pnpm --filter server build",
     "seed": "pnpm --filter server seed",
     "db:migrate": "pnpm --filter server db:migrate",
     "package:windows": "bash scripts/package-windows.sh",
-    "electron:dev": "pnpm build && electron electron/main.js"
+    "electron:dev": "pnpm build && electron electron/main.js",
+    "electron:build": "pnpm build && electron-builder --win --x64",
+    "postinstall": "electron-builder install-app-deps"
   },
   "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264",
   "devDependencies": {
-    "@electron/rebuild": "^4.0.3",
     "electron": "^39.5.2",
+    "electron-builder": "^24.13.3",
     "electron-is-dev": "^3.0.1"
+  },
+  "build": {
+    "appId": "com.victoria.laser-app",
+    "productName": "Victoria Laser App",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "server/dist/**/*",
+      "server/package.json",
+      "!server/dist/drizzle/**/*",
+      "!**/node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "server/templates",
+        "to": "templates",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "server/assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "server/drizzle",
+        "to": "drizzle",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Victoria Laser"
+    },
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "npmRebuild": true
   }
 }

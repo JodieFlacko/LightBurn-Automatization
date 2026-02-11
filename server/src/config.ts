@@ -1,9 +1,14 @@
 import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'fs-extra';
 import Conf from 'conf';
 import isWsl from 'is-wsl';
+
+// ESM shim for __dirname and __filename
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Central configuration manager for Victoria Laser App.
@@ -277,6 +282,28 @@ console.log('═'.repeat(80) + '\n');
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Gets the path to bundled resources (templates and assets).
+ * 
+ * In production Electron: resources are at process.resourcesPath
+ * In dev (WSL or standalone Node): resources are in server/templates/ and server/assets/
+ * 
+ * @returns The base path containing bundled templates/ and assets/ folders
+ */
+function getBundledResourcesPath(): string {
+  const electronResources = getElectronResourcesPath();
+  if (electronResources) return electronResources;
+  
+  if (IS_WSL) {
+    // WSL: Resolve to project root server/ folder
+    // Use __dirname (which is in server/dist/src/) and go up to server/
+    return path.resolve(__dirname, '..', '..');
+  }
+  
+  // Standalone Node.js: same logic as WSL
+  return path.resolve(__dirname, '..', '..');
+}
+
+/**
  * Ensures all required directories exist.
  * Creates them if they don't exist yet.
  * 
@@ -306,6 +333,48 @@ function initializeDirectories(): void {
     // Ensure temp directory exists
     fs.ensureDirSync(paths.temp);
     console.log(`[config] ✓ Temp directory: ${paths.temp}`);
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // First-Run Resource Copying
+    // ─────────────────────────────────────────────────────────────────────────────
+    
+    // Define bundled resource paths
+    const bundledTemplates = path.join(getBundledResourcesPath(), 'templates');
+    const bundledAssets = path.join(getBundledResourcesPath(), 'assets');
+    
+    // Check if templates folder is empty or missing
+    try {
+      const templatesEmpty = !fs.existsSync(paths.templates) || 
+                             fs.readdirSync(paths.templates).length === 0;
+      
+      if (templatesEmpty && fs.existsSync(bundledTemplates)) {
+        fs.copySync(bundledTemplates, paths.templates, { 
+          overwrite: false,  // Don't overwrite existing files
+          errorOnExist: false 
+        });
+        console.log(`[config] ✓ Copied bundled templates from ${bundledTemplates}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`[config] ⚠ Could not copy templates: ${errorMessage}`);
+    }
+    
+    // Repeat same logic for assets
+    try {
+      const assetsEmpty = !fs.existsSync(paths.assets) || 
+                          fs.readdirSync(paths.assets).length === 0;
+      
+      if (assetsEmpty && fs.existsSync(bundledAssets)) {
+        fs.copySync(bundledAssets, paths.assets, { 
+          overwrite: false,
+          errorOnExist: false 
+        });
+        console.log(`[config] ✓ Copied bundled assets from ${bundledAssets}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`[config] ⚠ Could not copy assets: ${errorMessage}`);
+    }
     
     console.log('[config] All directories initialized successfully\n');
   } catch (error) {
