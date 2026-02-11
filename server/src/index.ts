@@ -12,6 +12,7 @@ import { orders, templateRules, assetRules, Order } from "./schema.js";
 import { syncOrders } from "./sync.js";
 import { generateLightBurnProject, hasRetroTemplate } from "./lightburn.js";
 import { logger, logError } from "./logger.js";
+import { config } from "./config.js";
 
 const app = Fastify({ 
   logger: {
@@ -55,6 +56,7 @@ await app.register(fastifyStatic, {
 runMigrations();
 
 logger.info("Victoria Laser App server initializing...");
+logger.info({ paths: config.paths }, "Server started with configuration");
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -380,9 +382,8 @@ const handleSideProcessing = async (
     `${sideLabel} side locked for processing`
   );
 
-  // Resolve the templates directory
-  const templatesDir = path.join(process.cwd(), "templates");
-  const defaultTemplatePath = path.join(templatesDir, `targhetta-osso-${sideLabel}.lbrn2`);
+  // Use config path for templates directory (native Windows path)
+  const defaultTemplatePath = path.join(config.paths.templates, `targhetta-osso-${sideLabel}.lbrn2`);
 
   // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
   
@@ -399,8 +400,7 @@ const handleSideProcessing = async (
       { 
         orderId: result.orderId,
         side: sideLabel,
-        wslPath: result.wslPath,
-        windowsPath: result.windowsPath 
+        filePath: result.filePath
       },
       `LightBurn project generated successfully for ${sideLabel} side`
     );
@@ -446,8 +446,7 @@ const handleSideProcessing = async (
       success: true,
       side: sideLabel,
       orderId: result.orderId,
-      wslPath: result.wslPath,
-      windowsPath: result.windowsPath,
+      filePath: result.filePath,
       message: `LightBurn project generated and launched successfully for ${sideLabel} side`,
       warning: currentStatus === 'printed' ? `This ${sideLabel} side was already marked as printed. Reprocessed successfully.` : undefined
     };
@@ -681,9 +680,8 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     "Order locked for processing"
   );
 
-  // Resolve the templates directory
-  const templatesDir = path.join(process.cwd(), "templates");
-  const defaultTemplatePath = path.join(templatesDir, "targhetta-osso-fronte.lbrn2");
+  // Use config path for templates directory (native Windows path)
+  const defaultTemplatePath = path.join(config.paths.templates, "targhetta-osso-fronte.lbrn2");
 
   // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
   
@@ -695,8 +693,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     logger.info(
       { 
         orderId: result.orderId, 
-        wslPath: result.wslPath,
-        windowsPath: result.windowsPath 
+        filePath: result.filePath
       },
       "LightBurn project generated successfully"
     );
@@ -736,8 +733,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
     return {
       success: true,
       orderId: result.orderId,
-      wslPath: result.wslPath,
-      windowsPath: result.windowsPath,
+      filePath: result.filePath,
       message: "LightBurn project generated and launched successfully",
       warning: order.status === 'printed' ? "This order was already marked as printed. Reprocessed successfully." : undefined
     };

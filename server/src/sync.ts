@@ -9,6 +9,7 @@ import { orders } from "./schema.js";
 import { getByPath, normalizeRecord } from "./parser.js";
 import { logger, logError } from "./logger.js";
 import { hasRetroTemplate } from "./lightburn.js";
+import { config } from "./config.js";
 
 type SyncResult = {
   added: number;
@@ -108,13 +109,8 @@ function parseFeed(text: string, contentType: string | null, sourcePath: string)
 }
 
 export async function syncOrders(): Promise<SyncResult> {
-  const feedUrl = process.env.FEED_URL;
-  if (!feedUrl) {
-    const error = new Error("FEED_URL is not set in .env");
-    logError(error, { operation: "sync_orders" });
-    throw error;
-  }
-
+  const feedUrl = config.getFeedUrl();
+  
   logger.info({ feedUrl }, "Starting order synchronization");
 
   const { text, contentType, sourcePath } = await readFeedContent(feedUrl);

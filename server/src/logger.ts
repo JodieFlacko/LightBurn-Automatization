@@ -1,12 +1,9 @@
 import pino from "pino";
-import fs from "node:fs";
 import path from "node:path";
+import { config } from "./config.js";
 
-// Ensure logs directory exists
-const logsDir = path.join(process.cwd(), "logs");
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
+// Use the centralized config for logs directory (in AppData)
+const logsDir = config.paths.logs;
 
 // Determine if we're in development mode
 const isDevelopment = process.env.NODE_ENV !== "production";

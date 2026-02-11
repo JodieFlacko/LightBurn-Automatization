@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
 import { desc } from "drizzle-orm";
-import os from "node:os";
 import { logger, logError } from "./logger.js";
+import { config } from "./config.js";
 
 const execPromise = promisify(exec);
 
@@ -19,8 +19,7 @@ interface Order {
 }
 
 interface LightBurnResult {
-  wslPath: string;
-  windowsPath: string;
+  filePath: string;
   orderId: string;
   detectedColor?: string;
 }
@@ -114,40 +113,40 @@ async function executeLightBurnWithRetry(
 
 /**
  * Verify that the generated LightBurn file exists and is valid
- * @param wslPath - The WSL path to the generated file
+ * @param filePath - The path to the generated file
  * @param orderId - The order ID for logging purposes
  * @returns Promise resolving when verification succeeds
  */
-async function verifyLightBurnFile(wslPath: string, orderId: string): Promise<void> {
-  logger.info({ wslPath, orderId }, "Starting file verification");
+async function verifyLightBurnFile(filePath: string, orderId: string): Promise<void> {
+  logger.info({ filePath, orderId }, "Starting file verification");
 
   // Wait for file system to flush
   await new Promise((resolve) => setTimeout(resolve, 500));
 
   try {
     // Check if file exists
-    await fs.access(wslPath);
-    logger.debug({ wslPath }, "File exists, checking size");
+    await fs.access(filePath);
+    logger.debug({ filePath }, "File exists, checking size");
 
     // Check file size
-    const stats = await fs.stat(wslPath);
+    const stats = await fs.stat(filePath);
     const fileSizeBytes = stats.size;
 
     logger.info(
-      { wslPath, fileSizeBytes, orderId },
+      { filePath, fileSizeBytes, orderId },
       "File verification: size check"
     );
 
     if (fileSizeBytes <= 1024) {
       const error = new Error(
-        `LIGHTBURN_FILE_VERIFICATION_FAILED: Generated file at ${wslPath} is too small (${fileSizeBytes} bytes). Valid .lbrn2 files should be larger than 1024 bytes.`
+        `LIGHTBURN_FILE_VERIFICATION_FAILED: Generated file at ${filePath} is too small (${fileSizeBytes} bytes). Valid .lbrn2 files should be larger than 1024 bytes.`
       );
-      logError(error, { wslPath, fileSizeBytes, orderId });
+      logError(error, { filePath, fileSizeBytes, orderId });
       throw error;
     }
 
     logger.info(
-      { wslPath, fileSizeBytes, orderId },
+      { filePath, fileSizeBytes, orderId },
       "File verification passed"
     );
   } catch (error) {
@@ -157,11 +156,11 @@ async function verifyLightBurnFile(wslPath: string, orderId: string): Promise<vo
 
     // File doesn't exist or other access error
     const verificationError = new Error(
-      `LIGHTBURN_FILE_VERIFICATION_FAILED: Failed to verify generated file at ${wslPath}. ${
+      `LIGHTBURN_FILE_VERIFICATION_FAILED: Failed to verify generated file at ${filePath}. ${
         error instanceof Error ? error.message : "File may not exist"
       }`
     );
-    logError(verificationError, { wslPath, orderId, originalError: error });
+    logError(verificationError, { filePath, orderId, originalError: error });
     throw verificationError;
   }
 }
@@ -273,25 +272,18 @@ async function detectAssets(customField: string | null): Promise<DetectedAssets>
 /**
  * Copy image to temp directory
  * @param imageName - Name of the image file
- * @returns Windows path to the copied image
+ * @returns Path to the copied image
  */
 async function copyImageToTemp(imageName: string): Promise<string> {
-  const sourcePath = path.join(process.cwd(), "assets", imageName);
-  
-  // Determine temp directory based on OS
-  const isWindows = os.platform() === "win32";
-  const tempDir = isWindows ? "C:\\Temp\\LightBurnAuto" : "/mnt/c/Temp/LightBurnAuto";
-  
-  await fs.mkdir(tempDir, { recursive: true });
-  
-  const destPath = path.join(tempDir, imageName);
+  // Use config paths for assets and temp (native Windows paths)
+  const sourcePath = path.join(config.paths.assets, imageName);
+  const destPath = path.join(config.paths.temp, imageName);
   
   try {
     await fs.copyFile(sourcePath, destPath);
     logger.info({ imageName, sourcePath, destPath }, "Image copied to temp directory");
     
-    // Return Windows path format
-    return isWindows ? destPath : `C:\\Temp\\LightBurnAuto\\${imageName}`;
+    return destPath;
   } catch (error) {
     logError(error, { imageName, sourcePath, operation: "copy_image" });
     throw new Error(`Failed to copy image ${imageName}`);
@@ -527,9 +519,9 @@ export async function hasRetroTemplate(sku: string | null): Promise<boolean> {
 /**
  * Generate a LightBurn project file from a template by injecting order data
  * @param order - The order data containing buyer information
- * @param defaultTemplatePath - Path to the default LightBurn template file
+ * @param defaultTemplatePath - Path to the default LightBurn template file (legacy, now ignored)
  * @param side - The side to process ('front' or 'retro')
- * @returns Promise with the generated file paths
+ * @returns Promise with the generated file path
  */
 export async function generateLightBurnProject(
   order: Order,
@@ -562,9 +554,8 @@ export async function generateLightBurnProject(
 
     logger.info({ matchedTemplate, side }, "Template matched for SKU");
     
-    // Construct the full path to the matched template
-    const templatesDir = path.dirname(defaultTemplatePath);
-    const templatePath = path.join(templatesDir, matchedTemplate);
+    // Use config path for templates (native Windows path in Documents)
+    const templatePath = path.join(config.paths.templates, matchedTemplate);
     
     // Check if the template file exists
     try {
@@ -606,23 +597,21 @@ export async function generateLightBurnProject(
     // Handle image asset (copy and swap)
     if (detectedAssets.imageAsset) {
       try {
-        const windowsImagePath = await copyImageToTemp(detectedAssets.imageAsset);
+        const imagePath = await copyImageToTemp(detectedAssets.imageAsset);
         
         // Track the copied file for cleanup in case of later failure
-        // Convert Windows path to WSL path for deletion
-        const wslImagePath = windowsImagePath.replace(/^C:\\/, '/mnt/c/').replace(/\\/g, '/');
-        copiedFiles.push(wslImagePath);
-        logger.debug({ wslImagePath }, "Tracking copied image file for potential cleanup");
+        copiedFiles.push(imagePath);
+        logger.debug({ imagePath }, "Tracking copied image file for potential cleanup");
         
         const imageShape = $('Shape[Name="{{DESIGN_IMAGE}}"]');
         
         if (imageShape.length > 0) {
           // The Magic Fix: Set File, empty Data, reset SourceHash
-          imageShape.attr("File", windowsImagePath);
+          imageShape.attr("File", imagePath);
           imageShape.attr("Data", "");
           imageShape.attr("SourceHash", "0");
           logger.info(
-            { windowsImagePath, orderId: order.orderId },
+            { imagePath, orderId: order.orderId },
             "Image injected with Magic Fix (Data='', SourceHash='0')"
           );
         } else {
@@ -644,30 +633,22 @@ export async function generateLightBurnProject(
       );
     }
 
-    // Prepare the output directory (WSL path)
-    const outputDir = "/mnt/c/Temp/LightBurnAuto";
-    await fs.mkdir(outputDir, { recursive: true });
-
-    // Generate the output filename with side indicator
+    // Use config path for temp directory (native Windows path)
     const sideLabel = side === 'retro' ? 'retro' : 'fronte';
     const filename = `Order_${order.orderId}_${sideLabel}.lbrn2`;
-    const wslPath = path.join(outputDir, filename);
+    const filePath = path.join(config.paths.temp, filename);
 
     // Save the modified XML
     const modifiedContent = $.xml();
-    await fs.writeFile(wslPath, modifiedContent, "utf-8");
-    logger.info({ wslPath, orderId: order.orderId }, "LightBurn file written");
+    await fs.writeFile(filePath, modifiedContent, "utf-8");
+    logger.info({ filePath, orderId: order.orderId }, "LightBurn file written");
 
-    // Convert WSL path to Windows path
-    // /mnt/c/Temp/LightBurnAuto -> C:\Temp\LightBurnAuto
-    const windowsPath = `C:\\Temp\\LightBurnAuto\\${filename}`;
-
-    // Launch LightBurn on Windows with retry logic
+    // Launch LightBurn with retry logic (native Windows execution)
     const lightBurnPath = 'C:\\Program Files\\LightBurn\\LightBurn.exe';
-    const command = `cmd.exe /C start "" "${lightBurnPath}" "${windowsPath}"`;
+    const command = `cmd.exe /C start "" "${lightBurnPath}" "${filePath}"`;
 
     logger.info(
-      { orderId: order.orderId, windowsPath, lightBurnPath },
+      { orderId: order.orderId, filePath, lightBurnPath },
       "Launching LightBurn with retry logic"
     );
 
@@ -675,26 +656,26 @@ export async function generateLightBurnProject(
       await executeLightBurnWithRetry(command, 2);
 
       logger.info(
-        { orderId: order.orderId, windowsPath },
+        { orderId: order.orderId, filePath },
         "LightBurn command executed successfully"
       );
     } catch (error) {
       logError(error, {
         orderId: order.orderId,
-        windowsPath,
+        filePath,
         operation: "launch_lightburn"
       });
       throw error;
     }
 
     // Verify the generated file exists and is valid
-    logger.info({ orderId: order.orderId, wslPath }, "Verifying generated file");
-    await verifyLightBurnFile(wslPath, order.orderId);
+    logger.info({ orderId: order.orderId, filePath }, "Verifying generated file");
+    await verifyLightBurnFile(filePath, order.orderId);
 
     logger.info(
       { 
         orderId: order.orderId, 
-        windowsPath,
+        filePath,
         detectedColor: detectedAssets.colorAsset
       },
       "LightBurn launched and file verified successfully"
@@ -708,8 +689,7 @@ export async function generateLightBurnProject(
     );
 
     return {
-      wslPath,
-      windowsPath,
+      filePath,
       orderId: order.orderId,
       detectedColor: detectedAssets.colorAsset,
     };

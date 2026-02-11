@@ -1,10 +1,9 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import path from "node:path";
+import { config } from "./config.js";
 
-const dbPath = process.env.DB_PATH
-  ? path.resolve(process.env.DB_PATH)
-  : path.resolve(process.cwd(), "db.sqlite");
+// Use the centralized config for database path (in AppData)
+const dbPath = config.paths.db;
 
 const sqlite = new Database(dbPath);
 
