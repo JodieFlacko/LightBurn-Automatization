@@ -1,6 +1,5 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
-import isDev from 'electron-is-dev';
 import { startServer } from '../server/dist/src/index.js';
 
 let mainWindow;
@@ -25,7 +24,7 @@ function createWindow(serverAddress) {
   mainWindow.loadURL(serverAddress);
 
   // Open DevTools in development mode
-  if (isDev) {
+  if (!app.isPackaged) {
     mainWindow.webContents.openDevTools();
   }
 

@@ -1,4 +1,10 @@
-import "dotenv/config";
+// Optional dotenv load (prevents crash in production if missing)
+try {
+  await import("dotenv/config");
+} catch (e) {
+  // Ignore missing dotenv in production
+}
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -1448,7 +1454,9 @@ export async function startServer(overridePort?: number) {
   const port = overridePort !== undefined ? overridePort : Number(process.env.PORT || 3001);
   
   // Run migrations
-  runMigrations();
+  logger.info('Running database migrations...');
+  await runMigrations();
+  logger.info('✓ Database migrations complete');
   
   logger.info("Victoria Laser App server initializing...");
   logger.info({ paths: config.paths }, "Server started with configuration");
