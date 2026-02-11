@@ -39,6 +39,18 @@ function createWindow(serverAddress) {
  */
 app.whenReady().then(async () => {
   try {
+    // Pass Electron-specific paths to server via environment variables
+    const userDataPath = app.getPath('userData');
+    const tempPath = app.getPath('temp');
+    const resourcesPath = process.resourcesPath;
+    
+    process.env.ELECTRON_USER_DATA_PATH = userDataPath;
+    process.env.ELECTRON_TEMP_PATH = tempPath;
+    process.env.ELECTRON_RESOURCES_PATH = resourcesPath;
+    process.env.IS_ELECTRON = 'true';
+    
+    console.log('Electron: Passing paths to server:', { userDataPath, tempPath, resourcesPath });
+    
     // Start the Fastify server on a random free port
     const { app: fastifyApp, address, port } = await startServer(0);
     

@@ -38,6 +38,11 @@ let cachedWindowsUsername: string | null = null;
 export const IS_WSL = isWsl;
 
 /**
+ * Detects if we're running inside an Electron app
+ */
+export const IS_ELECTRON = process.env.IS_ELECTRON === 'true';
+
+/**
  * Gets the actual Windows username when running in WSL.
  * This is critical for mapping WSL paths to the correct Windows user directory.
  * 
@@ -90,10 +95,17 @@ function getWindowsUsername(): string {
 /**
  * Resolves the Windows AppData/Roaming directory for application data.
  * 
+ * Electron: Uses path provided by Electron main process via environment variable
  * Native Windows: C:\Users\Name\AppData\Roaming\VictoriaLaserApp
  * WSL: /mnt/c/Users/Name/AppData/Roaming/VictoriaLaserApp
  */
 function getUserDataPath(): string {
+  // Check if running in Electron and environment variable is set
+  if (IS_ELECTRON && process.env.ELECTRON_USER_DATA_PATH) {
+    console.log(`[config] Using Electron userData path: ${process.env.ELECTRON_USER_DATA_PATH}`);
+    return process.env.ELECTRON_USER_DATA_PATH;
+  }
+  
   if (IS_WSL) {
     // Running in WSL - map to Windows filesystem via /mnt/c/
     const windowsUsername = getWindowsUsername();
@@ -127,10 +139,16 @@ function getDocumentsPath(): string {
 /**
  * Resolves the temp directory for LightBurn files.
  * 
+ * Electron: Uses path provided by Electron main process via environment variable
  * Native Windows: C:\Users\Name\AppData\Local\Temp\VictoriaLaserApp
  * WSL: /mnt/c/Temp/LightBurnAuto (legacy path for compatibility)
  */
 function getTempPath(): string {
+  // Check if running in Electron and environment variable is set
+  if (IS_ELECTRON && process.env.ELECTRON_TEMP_PATH) {
+    return process.env.ELECTRON_TEMP_PATH;
+  }
+  
   if (IS_WSL) {
     // Running in WSL - use legacy temp path for compatibility
     return '/mnt/c/Temp/LightBurnAuto';
@@ -138,6 +156,16 @@ function getTempPath(): string {
 
   // Running natively on Windows
   return path.join(os.tmpdir(), APP_NAME);
+}
+
+/**
+ * Gets the Electron resources path if available.
+ * This path is set by the Electron main process and points to the app's resources directory.
+ * 
+ * @returns The resources path if running in Electron, null otherwise
+ */
+export function getElectronResourcesPath(): string | null {
+  return process.env.ELECTRON_RESOURCES_PATH || null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +247,8 @@ const store = new Conf<ConfigSchema>({
  */
 export const PLATFORM_INFO = {
   isWSL: IS_WSL,
-  platform: IS_WSL ? 'WSL' : 'Native Windows',
+  isElectron: IS_ELECTRON,
+  platform: IS_ELECTRON ? 'Electron' : (IS_WSL ? 'WSL' : 'Native Windows'),
   windowsUsername: IS_WSL ? getWindowsUsername() : os.userInfo().username,
   nodeVersion: process.version,
 };
@@ -285,6 +314,59 @@ function initializeDirectories(): void {
     throw error;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WSL to Windows Path Migration (One-time)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Migrates WSL-format paths stored in config to Windows-format paths.
+ * This is needed when transitioning from WSL development to native Windows/Electron.
+ * 
+ * Safety: Only runs when:
+ * - Running in Electron OR on native Windows (win32)
+ * - NOT running in WSL
+ * 
+ * Conversion: /mnt/c/Users/Name/... → C:\Users\Name\...
+ */
+function migrateWslPathsToWindows(): void {
+  // Safety check: Only migrate if we're in Electron or native Windows, but NOT in WSL
+  if (!(IS_ELECTRON || process.platform === 'win32') || IS_WSL) {
+    return; // Skip migration - either we're in WSL or not on Windows
+  }
+
+  try {
+    const templatesPath = store.get('templatesPath');
+    
+    // Check if templatesPath exists and starts with WSL mount point
+    if (templatesPath && templatesPath.startsWith('/mnt/')) {
+      // Extract drive letter from /mnt/c/ → c
+      const match = templatesPath.match(/^\/mnt\/([a-z])\//);
+      
+      if (match) {
+        const driveLetter = match[1].toUpperCase();
+        
+        // Convert WSL path to Windows path
+        // Example: /mnt/c/Users/peppe/Documents → C:\Users\peppe\Documents
+        const windowsPath = templatesPath
+          .replace(/^\/mnt\/[a-z]\//, `${driveLetter}:\\`)
+          .replace(/\//g, '\\');
+        
+        // Save the converted path back to config
+        store.set('templatesPath', windowsPath);
+        
+        console.log(`[config] Migrated WSL path to Windows: ${templatesPath} → ${windowsPath}`);
+      }
+    }
+  } catch (error) {
+    // Log error but don't fail initialization
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(`[config] Warning: Failed to migrate WSL paths: ${errorMessage}`);
+  }
+}
+
+// Migrate WSL paths before initializing directories
+migrateWslPathsToWindows();
 
 // Initialize directories on module load
 initializeDirectories();
