@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { z } from "zod";
-import fs from "node:fs/promises";
+import fs from "fs-extra";
 import path from "node:path";
 import { and, eq, like, ne, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
@@ -121,6 +121,228 @@ async function updateOverallStatus(orderId: string): Promise<void> {
 }
 
 app.get("/health", async () => ({ ok: true }));
+
+// ==================== CONFIGURATION ENDPOINTS ====================
+
+/**
+ * GET /config - Returns current feed URL configuration
+ */
+app.get("/config", async () => {
+  const feedUrl = config.getFeedUrl();
+  logger.info({ feedUrl }, "Configuration retrieved");
+  return { feedUrl };
+});
+
+/**
+ * POST /config - Updates feed URL configuration
+ */
+app.post("/config", async (request, reply) => {
+  const bodySchema = z.object({
+    feedUrl: z.string().min(1)
+  });
+
+  try {
+    const { feedUrl: rawFeedUrl } = bodySchema.parse(request.body);
+    
+    // Trim whitespace
+    const feedUrl = rawFeedUrl.trim();
+    
+    // Validate: must be either a valid HTTP/HTTPS URL or an absolute file path
+    let isValid = false;
+    let validationType = '';
+    
+    // Check if it's an HTTP/HTTPS URL
+    if (feedUrl.startsWith('http://') || feedUrl.startsWith('https://')) {
+      try {
+        new URL(feedUrl);
+        isValid = true;
+        validationType = 'HTTP URL';
+      } catch {
+        // Not a valid URL
+      }
+    }
+    
+    // If not a valid HTTP URL, check if it's an absolute file path
+    if (!isValid) {
+      // Check for absolute paths (both Windows and Unix style)
+      const isAbsolute = path.isAbsolute(feedUrl) || /^[a-zA-Z]:[\\\/]/.test(feedUrl);
+      if (isAbsolute) {
+        isValid = true;
+        validationType = 'Absolute file path';
+      }
+    }
+    
+    if (!isValid) {
+      logger.warn({ feedUrl }, "Invalid feed URL provided");
+      reply.code(400);
+      return {
+        error: "Feed must be a valid HTTP URL or an absolute file path."
+      };
+    }
+    
+    // Log the change
+    const oldFeedUrl = config.getFeedUrl();
+    logger.info(
+      { oldFeedUrl, newFeedUrl: feedUrl, validationType },
+      "Feed URL configuration updated"
+    );
+    
+    // Update config
+    config.setFeedUrl(feedUrl);
+    
+    return {
+      success: true,
+      feedUrl
+    };
+  } catch (error) {
+    logger.error({ error }, "Failed to update feed URL");
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Invalid request body"
+    };
+  }
+});
+
+/**
+ * POST /config/test - Tests feed connection without saving
+ */
+app.post("/config/test", async (request, reply) => {
+  const bodySchema = z.object({
+    feedUrl: z.string().min(1)
+  });
+
+  try {
+    const { feedUrl: rawFeedUrl } = bodySchema.parse(request.body);
+    
+    // Trim whitespace
+    const feedUrl = rawFeedUrl.trim();
+    
+    logger.info({ feedUrl }, "Testing feed connection");
+    
+    // Determine if it's HTTP/HTTPS or file path
+    const isHttp = feedUrl.startsWith('http://') || feedUrl.startsWith('https://');
+    
+    if (isHttp) {
+      // Test HTTP/HTTPS connection with GET request
+      // Using GET instead of HEAD because some dynamic URLs (like Google Apps Script)
+      // reject HEAD requests with 403 but accept GET requests
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const response = await fetch(feedUrl, {
+          method: 'GET',
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeout);
+        
+        if (response.ok) {
+          // Read only first 500 bytes to avoid downloading large feeds
+          // This verifies the feed is accessible without consuming too much bandwidth
+          try {
+            const reader = response.body?.getReader();
+            if (reader) {
+              await reader.read();
+              reader.releaseLock();
+            }
+          } catch (readError) {
+            // If we can't read the body, that's fine - the HTTP status was OK
+            logger.debug({ feedUrl }, "Could not read response body, but status was OK");
+          }
+          
+          logger.info({ feedUrl, status: response.status }, "HTTP feed connection successful");
+          return {
+            success: true,
+            message: "Feed is accessible (HTTP GET successful)"
+          };
+        } else {
+          // Special handling for 403/405 errors which may indicate dynamic URLs
+          if (response.status === 403 || response.status === 405) {
+            logger.warn({ feedUrl, status: response.status }, "Feed rejected connection test");
+            reply.code(400);
+            return {
+              success: false,
+              message: `Could not access feed: HTTP ${response.status}. Feed rejected the connection test. This may be a dynamic URL that only responds to full requests. Try saving and running Sync to verify.`
+            };
+          }
+          
+          logger.warn({ feedUrl, status: response.status }, "HTTP feed returned non-OK status");
+          reply.code(400);
+          return {
+            success: false,
+            message: `Could not access feed: HTTP ${response.status} ${response.statusText}`
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ feedUrl, error: errorMessage }, "HTTP feed connection failed");
+        reply.code(400);
+        return {
+          success: false,
+          message: `Could not access feed: ${errorMessage}`
+        };
+      }
+    } else {
+      // Test file path
+      try {
+        // Check if path is absolute
+        const isAbsolute = path.isAbsolute(feedUrl) || /^[a-zA-Z]:[\\\/]/.test(feedUrl);
+        
+        if (!isAbsolute) {
+          logger.warn({ feedUrl }, "File path is not absolute");
+          reply.code(400);
+          return {
+            success: false,
+            message: "Could not access feed: File path must be absolute"
+          };
+        }
+        
+        // Check if file exists
+        if (!fs.existsSync(feedUrl)) {
+          logger.warn({ feedUrl }, "File does not exist");
+          reply.code(400);
+          return {
+            success: false,
+            message: `Could not access feed: File does not exist at path: ${feedUrl}`
+          };
+        }
+        
+        // Check if file is readable
+        try {
+          fs.accessSync(feedUrl, fs.constants.R_OK);
+        } catch {
+          logger.warn({ feedUrl }, "File is not readable");
+          reply.code(400);
+          return {
+            success: false,
+            message: `Could not access feed: File exists but is not readable`
+          };
+        }
+        
+        logger.info({ feedUrl }, "File feed connection successful");
+        return {
+          success: true,
+          message: "Connection successful"
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ feedUrl, error: errorMessage }, "File feed connection test failed");
+        reply.code(400);
+        return {
+          success: false,
+          message: `Could not access feed: ${errorMessage}`
+        };
+      }
+    }
+  } catch (error) {
+    logger.error({ error }, "Feed connection test request failed");
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Invalid request body"
+    };
+  }
+});
 
 app.post("/sync", async (request, reply) => {
   try {

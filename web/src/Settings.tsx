@@ -33,6 +33,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const [skuPattern, setSkuPattern] = useState(suggestedSku || "");
   const [templateFilename, setTemplateFilename] = useState("");
   const [priority, setPriority] = useState(0);
@@ -42,6 +43,101 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   const [assetType, setAssetType] = useState<'image' | 'font' | 'color'>('image');
   const [assetValue, setAssetValue] = useState("");
 
+  // General config state
+  const [feedUrl, setFeedUrl] = useState("");
+  const [initialFeedUrl, setInitialFeedUrl] = useState("");
+  const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+
+  // Helper to show toast with type
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast(message);
+    setToastType(type);
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Fetch general config on mount
+  const fetchConfig = async () => {
+    setIsLoadingConfig(true);
+    try {
+      const response = await fetch(`${API_URL}/config`);
+      const data = await response.json();
+      setFeedUrl(data.feedUrl || "");
+      setInitialFeedUrl(data.feedUrl || "");
+    } catch (error) {
+      console.error("Failed to fetch config:", error);
+      showToast("Failed to load configuration", 'error');
+    } finally {
+      setIsLoadingConfig(false);
+    }
+  };
+
+  // Save feed URL configuration
+  const handleSave = async () => {
+    const trimmedUrl = feedUrl.trim();
+    
+    if (!trimmedUrl) {
+      showToast("Feed URL cannot be empty", 'error');
+      return;
+    }
+
+    setIsSavingConfig(true);
+    try {
+      const response = await fetch(`${API_URL}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedUrl: trimmedUrl })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to save configuration");
+      }
+
+      setInitialFeedUrl(trimmedUrl); // Update initial value to disable save button
+      showToast("Configuration saved. Run Sync to fetch orders from the new feed.", 'success');
+    } catch (error) {
+      console.error("Failed to save config:", error);
+      showToast(error instanceof Error ? error.message : "Failed to save configuration", 'error');
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
+  // Test feed connection without saving
+  const handleTestConnection = async () => {
+    const trimmedUrl = feedUrl.trim();
+    
+    if (!trimmedUrl) {
+      showToast("Feed URL cannot be empty", 'error');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    try {
+      const response = await fetch(`${API_URL}/config/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedUrl: trimmedUrl })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showToast("✓ Connection successful! Feed is accessible.", 'success');
+      } else {
+        showToast(`✗ Connection failed: ${data.message}`, 'error');
+      }
+    } catch (error) {
+      console.error("Failed to test connection:", error);
+      showToast("✗ Connection test failed: Network error", 'error');
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
   const fetchRules = async () => {
     setLoading(true);
     try {
@@ -50,8 +146,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       setRules(data.rules ?? []);
     } catch (error) {
       console.error("Failed to fetch rules:", error);
-      setToast("Failed to load rules");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Failed to load rules", 'error');
     } finally {
       setLoading(false);
     }
@@ -65,8 +160,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       setAssetRules(data.rules ?? []);
     } catch (error) {
       console.error("Failed to fetch asset rules:", error);
-      setToast("Failed to load asset rules");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Failed to load asset rules", 'error');
     } finally {
       setLoading(false);
     }
@@ -75,8 +169,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!skuPattern.trim() || !templateFilename.trim()) {
-      setToast("Both SKU pattern and template filename are required");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Both SKU pattern and template filename are required", 'error');
       return;
     }
 
@@ -97,16 +190,14 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         throw new Error(data.error || "Failed to create rule");
       }
 
-      setToast("Rule added successfully");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Rule added successfully", 'success');
       setSkuPattern("");
       setTemplateFilename("");
       setPriority(0);
       await fetchRules();
     } catch (error) {
       console.error("Failed to add rule:", error);
-      setToast(error instanceof Error ? error.message : "Failed to add rule");
-      setTimeout(() => setToast(null), 4000);
+      showToast(error instanceof Error ? error.message : "Failed to add rule", 'error');
     } finally {
       setSaving(false);
     }
@@ -126,21 +217,18 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         throw new Error("Failed to delete rule");
       }
 
-      setToast("Rule deleted successfully");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Rule deleted successfully", 'success');
       await fetchRules();
     } catch (error) {
       console.error("Failed to delete rule:", error);
-      setToast("Failed to delete rule");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Failed to delete rule", 'error');
     }
   };
 
   const handleAddAssetRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!triggerKeyword.trim() || !assetValue.trim()) {
-      setToast("Both keyword and value are required");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Both keyword and value are required", 'error');
       return;
     }
 
@@ -161,15 +249,13 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         throw new Error(data.error || "Failed to create asset rule");
       }
 
-      setToast("Asset rule added successfully");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Asset rule added successfully", 'success');
       setTriggerKeyword("");
       setAssetValue("");
       await fetchAssetRules();
     } catch (error) {
       console.error("Failed to add asset rule:", error);
-      setToast(error instanceof Error ? error.message : "Failed to add asset rule");
-      setTimeout(() => setToast(null), 4000);
+      showToast(error instanceof Error ? error.message : "Failed to add asset rule", 'error');
     } finally {
       setSaving(false);
     }
@@ -189,15 +275,18 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         throw new Error("Failed to delete asset rule");
       }
 
-      setToast("Asset rule deleted successfully");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Asset rule deleted successfully", 'success');
       await fetchAssetRules();
     } catch (error) {
       console.error("Failed to delete asset rule:", error);
-      setToast("Failed to delete asset rule");
-      setTimeout(() => setToast(null), 4000);
+      showToast("Failed to delete asset rule", 'error');
     }
   };
+
+  useEffect(() => {
+    // Fetch general config on initial mount
+    fetchConfig();
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'templates') {
@@ -226,7 +315,11 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         </header>
 
         {toast && (
-          <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <div className={`rounded border px-4 py-3 text-sm ${
+            toastType === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}>
             {toast}
           </div>
         )}
@@ -249,6 +342,66 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
             </div>
           </div>
         )}
+
+        {/* General Configuration Section */}
+        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-slate-800">General Configuration</h2>
+          
+          {isLoadingConfig ? (
+            <div className="text-center py-4 text-slate-500">Loading configuration...</div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Amazon Orders Feed URL / File Path
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder="http://example.com/feed.xml or C:\Users\Name\feed.xml"
+                  value={feedUrl}
+                  onChange={(e) => setFeedUrl(e.target.value)}
+                  disabled={isSavingConfig || isTestingConnection}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Enter a web URL (http://...) or a local file path (C:\Users\...)
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={handleTestConnection}
+                  disabled={feedUrl.trim() === '' || isTestingConnection || isSavingConfig}
+                >
+                  {isTestingConnection && (
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  {isTestingConnection ? "Testing..." : "Test Connection"}
+                </button>
+                
+                <button
+                  type="button"
+                  className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={handleSave}
+                  disabled={feedUrl.trim() === initialFeedUrl || isSavingConfig || isTestingConnection}
+                >
+                  {isSavingConfig && (
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  {isSavingConfig ? "Saving..." : "Save Configuration"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-slate-200">

@@ -141,20 +141,6 @@ function getTempPath(): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Configuration Store Initialization
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Persistent configuration store using the `conf` library.
- * Stores settings like feedUrl in a JSON file in the user data directory.
- */
-const configStore = new Conf({
-  projectName: APP_NAME,
-  // Conf will automatically use the appropriate OS location
-  // On Windows: %APPDATA%\VictoriaLaserApp\config.json
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Path Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -163,6 +149,12 @@ const documentsPath = getDocumentsPath();
 const tempPath = getTempPath();
 
 export const paths = {
+  /**
+   * User data directory (AppData on Windows)
+   * Example: C:\Users\Name\AppData\Roaming\VictoriaLaserApp
+   */
+  userData: userDataPath,
+
   /**
    * Database file location (in AppData)
    * Example: C:\Users\Name\AppData\Roaming\VictoriaLaserApp\db.sqlite
@@ -195,6 +187,29 @@ export const paths = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Configuration Store Initialization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Type-safe configuration schema
+ */
+interface ConfigSchema {
+  feedUrl: string;
+}
+
+/**
+ * Persistent configuration store using the `conf` library.
+ * Stores settings like feedUrl in a JSON file in the user data directory.
+ * 
+ * Initialized AFTER paths are resolved to ensure proper cross-environment support.
+ */
+const store = new Conf<ConfigSchema>({
+  cwd: paths.userData,
+  configName: 'config',
+  defaults: { feedUrl: '' }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Platform Information & Logging
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -222,6 +237,9 @@ console.log(`  Logs:      ${paths.logs}`);
 console.log(`  Templates: ${paths.templates}`);
 console.log(`  Assets:    ${paths.assets}`);
 console.log(`  Temp:      ${paths.temp}`);
+console.log('─'.repeat(80));
+console.log('Configuration:');
+console.log(`  Config File: ${store.path}`);
 console.log('═'.repeat(80) + '\n');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,26 +289,54 @@ function initializeDirectories(): void {
 initializeDirectories();
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auto-Migration from .env (One-time)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Automatically migrate FEED_URL from .env to persistent config if needed.
+ * This runs once on module load if:
+ * 1. FEED_URL environment variable exists
+ * 2. Stored feedUrl is empty
+ */
+function migrateFromEnv(): void {
+  const envFeedUrl = process.env.FEED_URL;
+  const storedFeedUrl = store.get('feedUrl');
+  
+  if (envFeedUrl && !storedFeedUrl) {
+    store.set('feedUrl', envFeedUrl);
+    console.log('[config] Migrated FEED_URL from .env to persistent config');
+  }
+}
+
+// Run migration on module load
+migrateFromEnv();
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Configuration API
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Default feed URL (fallback if none is stored)
- */
-const DEFAULT_FEED_URL = 'https://example.com/feed.csv';
-
-/**
- * Gets the stored feed URL or returns the default.
+ * Gets the stored feed URL.
+ * @returns The feed URL from persistent storage
  */
 export function getFeedUrl(): string {
-  return configStore.get('feedUrl', DEFAULT_FEED_URL) as string;
+  return store.get('feedUrl');
 }
 
 /**
  * Saves the feed URL to persistent storage.
+ * @param url The feed URL to save
  */
 export function setFeedUrl(url: string): void {
-  configStore.set('feedUrl', url);
+  store.set('feedUrl', url);
+}
+
+/**
+ * Gets the full configuration object.
+ * @returns The complete configuration schema
+ */
+export function getConfig(): ConfigSchema {
+  return store.store;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +351,7 @@ export const config = {
   paths,
   getFeedUrl,
   setFeedUrl,
+  getConfig,
 };
 
 export default config;
