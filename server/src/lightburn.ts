@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
@@ -10,6 +10,7 @@ import { logger, logError } from "./logger.js";
 import { config } from "./config.js";
 
 const execPromise = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 interface Order {
   orderId: string;
@@ -643,29 +644,43 @@ export async function generateLightBurnProject(
     await fs.writeFile(filePath, modifiedContent, "utf-8");
     logger.info({ filePath, orderId: order.orderId }, "LightBurn file written");
 
-    // Launch LightBurn with retry logic (native Windows execution)
-    const lightBurnPath = 'C:\\Program Files\\LightBurn\\LightBurn.exe';
-    const command = `cmd.exe /C start "" "${lightBurnPath}" "${filePath}"`;
-
-    logger.info(
-      { orderId: order.orderId, filePath, lightBurnPath },
-      "Launching LightBurn with retry logic"
-    );
-
+    // Launch LightBurn with path conversion for WSL compatibility
     try {
-      await executeLightBurnWithRetry(command, 2);
+      // Step 1: Convert path for Windows if running in WSL
+      let windowsPath = filePath;
+
+      if (process.platform === 'linux') {
+        // Use wslpath -w to convert /mnt/c/... to C:\...
+        const { stdout } = await execFileAsync('wslpath', ['-w', filePath]);
+        windowsPath = stdout.trim();
+        logger.info({ 
+          orderId: order.orderId, 
+          originalPath: filePath, 
+          windowsPath 
+        }, `Path converted for Windows: ${filePath} → ${windowsPath}`);
+      }
+
+      // Step 2: Launch LightBurn via Windows 'start' command
+      // The empty "" is the required window title parameter for the start command syntax
+      logger.info(
+        { orderId: order.orderId, windowsPath },
+        "Launching LightBurn with converted path"
+      );
+
+      await execFileAsync('cmd.exe', ['/c', 'start', '""', windowsPath]);
 
       logger.info(
-        { orderId: order.orderId, filePath },
-        "LightBurn command executed successfully"
+        { orderId: order.orderId, windowsPath },
+        "LightBurn launched successfully"
       );
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logError(error, {
         orderId: order.orderId,
         filePath,
         operation: "launch_lightburn"
       });
-      throw error;
+      throw new Error(`Failed to launch LightBurn: ${errorMessage}`);
     }
 
     // Verify the generated file exists and is valid

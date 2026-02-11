@@ -5,6 +5,9 @@ import fastifyStatic from "@fastify/static";
 import { z } from "zod";
 import fs from "fs-extra";
 import path from "node:path";
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import process from 'node:process';
 import { and, eq, like, ne, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
@@ -13,6 +16,10 @@ import { syncOrders } from "./sync.js";
 import { generateLightBurnProject, hasRetroTemplate } from "./lightburn.js";
 import { logger, logError } from "./logger.js";
 import { config } from "./config.js";
+
+// ESM shim for __filename and __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = Fastify({ 
   logger: {
@@ -47,16 +54,11 @@ const app = Fastify({
 await app.register(cors, { origin: true });
 
 // Serve static files from the public directory (React build output)
-// Use process.cwd() to work in both dev and production builds
+// Use __dirname to resolve relative to the compiled script location
 await app.register(fastifyStatic, {
-  root: path.join(process.cwd(), "public"),
+  root: join(__dirname, '../public'),
   prefix: "/",
 });
-
-runMigrations();
-
-logger.info("Victoria Laser App server initializing...");
-logger.info({ paths: config.paths }, "Server started with configuration");
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -125,77 +127,101 @@ app.get("/health", async () => ({ ok: true }));
 // ==================== CONFIGURATION ENDPOINTS ====================
 
 /**
- * GET /config - Returns current feed URL configuration
+ * GET /config - Returns current feed URL and templates path configuration
  */
 app.get("/config", async () => {
   const feedUrl = config.getFeedUrl();
-  logger.info({ feedUrl }, "Configuration retrieved");
-  return { feedUrl };
+  const templatesPath = config.getTemplatesPath();
+  logger.info({ feedUrl, templatesPath }, "Configuration retrieved");
+  return { feedUrl, templatesPath };
 });
 
 /**
- * POST /config - Updates feed URL configuration
+ * POST /config - Updates feed URL and/or templates path configuration
  */
 app.post("/config", async (request, reply) => {
   const bodySchema = z.object({
-    feedUrl: z.string().min(1)
+    feedUrl: z.string().min(1).optional(),
+    templatesPath: z.string().optional()
   });
 
   try {
-    const { feedUrl: rawFeedUrl } = bodySchema.parse(request.body);
+    const body = bodySchema.parse(request.body);
     
-    // Trim whitespace
-    const feedUrl = rawFeedUrl.trim();
+    // Handle feedUrl if provided
+    if (body.feedUrl !== undefined) {
+      const rawFeedUrl = body.feedUrl;
+      
+      // Trim whitespace
+      const feedUrl = rawFeedUrl.trim();
+      
+      // Validate: must be either a valid HTTP/HTTPS URL or an absolute file path
+      let isValid = false;
+      let validationType = '';
+      
+      // Check if it's an HTTP/HTTPS URL
+      if (feedUrl.startsWith('http://') || feedUrl.startsWith('https://')) {
+        try {
+          new URL(feedUrl);
+          isValid = true;
+          validationType = 'HTTP URL';
+        } catch {
+          // Not a valid URL
+        }
+      }
+      
+      // If not a valid HTTP URL, check if it's an absolute file path
+      if (!isValid) {
+        // Check for absolute paths (both Windows and Unix style)
+        const isAbsolute = path.isAbsolute(feedUrl) || /^[a-zA-Z]:[\\\/]/.test(feedUrl);
+        if (isAbsolute) {
+          isValid = true;
+          validationType = 'Absolute file path';
+        }
+      }
+      
+      if (!isValid) {
+        logger.warn({ feedUrl }, "Invalid feed URL provided");
+        reply.code(400);
+        return {
+          error: "Feed must be a valid HTTP URL or an absolute file path."
+        };
+      }
+      
+      // Log the change
+      const oldFeedUrl = config.getFeedUrl();
+      logger.info(
+        { oldFeedUrl, newFeedUrl: feedUrl, validationType },
+        "Feed URL configuration updated"
+      );
+      
+      // Update config
+      config.setFeedUrl(feedUrl);
+    }
     
-    // Validate: must be either a valid HTTP/HTTPS URL or an absolute file path
-    let isValid = false;
-    let validationType = '';
-    
-    // Check if it's an HTTP/HTTPS URL
-    if (feedUrl.startsWith('http://') || feedUrl.startsWith('https://')) {
+    // Handle templatesPath if provided (even if empty string)
+    if (body.templatesPath !== undefined) {
       try {
-        new URL(feedUrl);
-        isValid = true;
-        validationType = 'HTTP URL';
-      } catch {
-        // Not a valid URL
+        config.setTemplatesPath(body.templatesPath);
+        logger.info({ templatesPath: config.getTemplatesPath() }, "Templates path updated");
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Failed to set templates path");
+        reply.code(400);
+        return {
+          success: false,
+          message: errorMessage
+        };
       }
     }
-    
-    // If not a valid HTTP URL, check if it's an absolute file path
-    if (!isValid) {
-      // Check for absolute paths (both Windows and Unix style)
-      const isAbsolute = path.isAbsolute(feedUrl) || /^[a-zA-Z]:[\\\/]/.test(feedUrl);
-      if (isAbsolute) {
-        isValid = true;
-        validationType = 'Absolute file path';
-      }
-    }
-    
-    if (!isValid) {
-      logger.warn({ feedUrl }, "Invalid feed URL provided");
-      reply.code(400);
-      return {
-        error: "Feed must be a valid HTTP URL or an absolute file path."
-      };
-    }
-    
-    // Log the change
-    const oldFeedUrl = config.getFeedUrl();
-    logger.info(
-      { oldFeedUrl, newFeedUrl: feedUrl, validationType },
-      "Feed URL configuration updated"
-    );
-    
-    // Update config
-    config.setFeedUrl(feedUrl);
     
     return {
       success: true,
-      feedUrl
+      feedUrl: config.getFeedUrl(),
+      templatesPath: config.getTemplatesPath()
     };
   } catch (error) {
-    logger.error({ error }, "Failed to update feed URL");
+    logger.error({ error }, "Failed to update configuration");
     reply.code(400);
     return {
       error: error instanceof Error ? error.message : "Invalid request body"
@@ -1412,13 +1438,40 @@ app.setNotFoundHandler(async (request, reply) => {
   return { error: "Not found" };
 });
 
-const port = Number(process.env.PORT || 3001);
+/**
+ * Start the Fastify server
+ * @param overridePort - Optional port override (including 0 for random port)
+ * @returns Server info with app instance, address, and port
+ */
+export async function startServer(overridePort?: number) {
+  // Determine port: use override if provided (including 0), otherwise env or default
+  const port = overridePort !== undefined ? overridePort : Number(process.env.PORT || 3001);
+  
+  // Run migrations
+  runMigrations();
+  
+  logger.info("Victoria Laser App server initializing...");
+  logger.info({ paths: config.paths }, "Server started with configuration");
+  
+  // Start listening
+  const address = await app.listen({ port, host: "0.0.0.0" });
+  
+  logger.info({ port, host: "0.0.0.0", address }, `Server listening on ${address}`);
+  
+  return {
+    app,
+    address,
+    port: (app.server.address() as any)?.port || port
+  };
+}
 
-app.listen({ port, host: "0.0.0.0" })
-  .then(() => {
-    logger.info({ port, host: "0.0.0.0" }, `Server listening on http://0.0.0.0:${port}`);
-  })
-  .catch((error) => {
-    logError(error, { operation: "server_startup" });
+// Export app instance for Electron integration
+export { app };
+
+// ESM-compatible main check: only run server when executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startServer().catch(err => {
+    logError(err, { operation: "server_startup" });
     process.exit(1);
   });
+}

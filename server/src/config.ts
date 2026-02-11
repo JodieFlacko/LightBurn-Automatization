@@ -195,6 +195,7 @@ export const paths = {
  */
 interface ConfigSchema {
   feedUrl: string;
+  templatesPath: string | null;
 }
 
 /**
@@ -206,7 +207,7 @@ interface ConfigSchema {
 const store = new Conf<ConfigSchema>({
   cwd: paths.userData,
   configName: 'config',
-  defaults: { feedUrl: '' }
+  defaults: { feedUrl: '', templatesPath: null }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -332,6 +333,88 @@ export function setFeedUrl(url: string): void {
 }
 
 /**
+ * Gets the templates directory path.
+ * Returns custom path if set, otherwise returns default path.
+ * @returns The templates directory path
+ */
+export function getTemplatesPath(): string {
+  const customPath = store.get('templatesPath');
+  if (customPath !== null) {
+    return customPath;
+  }
+  // Return default path
+  return path.join(documentsPath, 'templates');
+}
+
+/**
+ * Sets the templates directory path with strict validation.
+ * Handles Windows-to-WSL path conversion and quote stripping.
+ * @param inputPath The templates directory path to set (null/undefined to reset to default)
+ * @throws Error if path doesn't exist or is not a directory
+ */
+export function setTemplatesPath(inputPath: string | null | undefined): void {
+  // ==================== PHASE 1: PRE-PROCESSING ====================
+  
+  // Normalize input: treat null/undefined as empty string
+  let processedPath = inputPath ?? '';
+  
+  // Trim whitespace
+  processedPath = processedPath.trim();
+  
+  // Strip surrounding quotes (both single and double)
+  processedPath = processedPath.replace(/^["']|["']$/g, '');
+  
+  // Empty check: if empty string, reset to default (null)
+  if (processedPath === '') {
+    store.set('templatesPath', null);
+    console.log('[config] Templates path reset to default');
+    return;
+  }
+  
+  // ==================== PHASE 2: WSL PATH CONVERSION (Linux Only) ====================
+  
+  let finalPath = processedPath;
+  
+  if (process.platform === 'linux') {
+    // Check if input matches Windows drive pattern (e.g., C:\ or C:/)
+    const windowsDrivePattern = /^([a-zA-Z]):[\\/]/;
+    const match = processedPath.match(windowsDrivePattern);
+    
+    if (match) {
+      // Extract drive letter and convert to lowercase
+      const driveLetter = match[1].toLowerCase();
+      
+      // Replace Windows prefix with WSL mount point
+      // Example: C:\ → /mnt/c/
+      finalPath = processedPath.replace(windowsDrivePattern, `/mnt/${driveLetter}/`);
+      
+      // Replace all remaining backslashes with forward slashes
+      finalPath = finalPath.replace(/\\/g, '/');
+      
+      console.log(`[config] Converted Windows path to WSL: ${processedPath} → ${finalPath}`);
+    }
+  }
+  
+  // ==================== PHASE 3: PATH VALIDATION ====================
+  
+  // Check if path exists
+  if (!fs.pathExistsSync(finalPath)) {
+    throw new Error(`Directory not found or invalid: ${finalPath}. Please check the path.`);
+  }
+  
+  // Check if it's a directory
+  const stats = fs.statSync(finalPath);
+  if (!stats.isDirectory()) {
+    throw new Error(`Directory not found or invalid: ${finalPath}. Please check the path.`);
+  }
+  
+  // ==================== PHASE 4: SAVE & LOG ====================
+  
+  store.set('templatesPath', finalPath);
+  console.log(`[config] Templates path set to: ${finalPath}`);
+}
+
+/**
  * Gets the full configuration object.
  * @returns The complete configuration schema
  */
@@ -351,6 +434,8 @@ export const config = {
   paths,
   getFeedUrl,
   setFeedUrl,
+  getTemplatesPath,
+  setTemplatesPath,
   getConfig,
 };
 

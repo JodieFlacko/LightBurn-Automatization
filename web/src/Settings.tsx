@@ -46,15 +46,17 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   // General config state
   const [feedUrl, setFeedUrl] = useState("");
   const [initialFeedUrl, setInitialFeedUrl] = useState("");
+  const [templatesPath, setTemplatesPath] = useState("");
+  const [initialTemplatesPath, setInitialTemplatesPath] = useState("");
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   // Helper to show toast with type
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' = 'success', duration = 4000) => {
     setToast(message);
     setToastType(type);
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), duration);
   };
 
   // Fetch general config on mount
@@ -65,6 +67,9 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       const data = await response.json();
       setFeedUrl(data.feedUrl || "");
       setInitialFeedUrl(data.feedUrl || "");
+      // Null safety: if templatesPath is null/undefined, use empty string
+      setTemplatesPath(data.templatesPath || "");
+      setInitialTemplatesPath(data.templatesPath || "");
     } catch (error) {
       console.error("Failed to fetch config:", error);
       showToast("Failed to load configuration", 'error');
@@ -73,7 +78,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
     }
   };
 
-  // Save feed URL configuration
+  // Save feed URL and templates path configuration
   const handleSave = async () => {
     const trimmedUrl = feedUrl.trim();
     
@@ -87,20 +92,34 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       const response = await fetch(`${API_URL}/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feedUrl: trimmedUrl })
+        body: JSON.stringify({ 
+          feedUrl: trimmedUrl,
+          templatesPath: templatesPath  // Send as-is (can be empty string)
+        })
       });
+
+      // Check status code FIRST before parsing
+      if (response.status !== 200) {
+        const errorData = await response.json();
+        const msg = errorData.message || "Unknown error occurred";
+        
+        // Show red error toast for 10 seconds
+        showToast("Failed to save: " + msg, 'error', 10000);
+        
+        // STOP: Do not show success message. Do not close form. Return early.
+        setIsSavingConfig(false);
+        return;
+      }
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to save configuration");
-      }
-
-      setInitialFeedUrl(trimmedUrl); // Update initial value to disable save button
-      showToast("Configuration saved. Run Sync to fetch orders from the new feed.", 'success');
+      // Success path
+      setInitialFeedUrl(trimmedUrl);
+      setInitialTemplatesPath(templatesPath);
+      showToast("Configuration saved successfully", 'success');
     } catch (error) {
       console.error("Failed to save config:", error);
-      showToast(error instanceof Error ? error.message : "Failed to save configuration", 'error');
+      showToast(error instanceof Error ? error.message : "Failed to save configuration", 'error', 10000);
     } finally {
       setIsSavingConfig(false);
     }
@@ -368,6 +387,34 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                 </p>
               </div>
 
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Templates Directory
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    placeholder="e.g., C:\Users\peppe\Documents\Victoria Laser\templates"
+                    value={templatesPath}
+                    onChange={(e) => setTemplatesPath(e.target.value)}
+                    disabled={isSavingConfig || isTestingConnection}
+                  />
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    onClick={() => setTemplatesPath("")}
+                    disabled={isSavingConfig || isTestingConnection}
+                    title="Clear custom path and use auto-detected location"
+                  >
+                    Use Default
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Full path to your LightBurn templates folder. Leave empty to use default location.
+                </p>
+              </div>
+
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -388,7 +435,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                   type="button"
                   className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   onClick={handleSave}
-                  disabled={feedUrl.trim() === initialFeedUrl || isSavingConfig || isTestingConnection}
+                  disabled={(feedUrl.trim() === initialFeedUrl && templatesPath === initialTemplatesPath) || isSavingConfig || isTestingConnection}
                 >
                   {isSavingConfig && (
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
