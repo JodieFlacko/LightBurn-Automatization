@@ -39,7 +39,7 @@ function SideStatusBadge({
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
         <span className="h-2 w-2 rounded-full bg-slate-400"></span>
-        Pending
+        Da Stampare
       </span>
     );
   }
@@ -165,16 +165,16 @@ function ErrorDetailsModal({
         {isConfigError && (
           <div className="mb-4 rounded-lg bg-orange-50 border border-orange-200 p-3">
             <p className="text-sm text-orange-800">
-              <strong>⚠️ Configuration Required</strong>
+              <strong>Configurazione Richiesta</strong>
               <br />
-              Add a template rule in Settings, then click "Reset & Retry" to process this order.
+              Aggiungi una template in Impostazioni, poi clicca "Reset & Retry" per processare l'ordine.
             </p>
           </div>
         )}
         
         <div className="space-y-4">
           <div>
-            <p className="text-sm font-medium text-slate-700">Order ID</p>
+            <p className="text-sm font-medium text-slate-700">ID Ordine</p>
             <p className="text-sm text-slate-600">{order.orderId}</p>
           </div>
           
@@ -198,7 +198,7 @@ function ErrorDetailsModal({
           
           {!isConfigError && (
             <div>
-              <p className="text-sm font-medium text-slate-700">Attempts</p>
+              <p className="text-sm font-medium text-slate-700">Tentativi</p>
               <p className="text-sm text-slate-600">
                 Failed after {order.attemptCount || 0} attempt{(order.attemptCount || 0) !== 1 ? 's' : ''}
               </p>
@@ -328,7 +328,7 @@ export default function App() {
         throw new Error(message);
       }
       await fetchOrders(searchTerm, filterMode);
-      setToast({ message: "Sync completed.", type: 'success' });
+      setToast({ message: "Sincronizzazione completata.", type: 'success' });
       setTimeout(() => setToast(null), 4000);
     } catch (error) {
       const message =
@@ -721,15 +721,15 @@ export default function App() {
   const renderTableHeader = (showDiscardColumn: boolean = false) => (
     <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
       <tr>
-        <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">Order ID</th>
+        <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">ID Ordine</th>
         <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">SKU</th>
-        <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Custom Field</th>
-        <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Color</th>
+        <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Campo Custom</th>
+        <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Colore</th>
         <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Status</th>
-        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Fronte</th>
-        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Retro</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Stampa Fronte</th>
+        <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Stampa Retro</th>
         {showDiscardColumn && (
-          <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Discard</th>
+          <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Scarta</th>
         )}
       </tr>
     </thead>
@@ -755,9 +755,9 @@ export default function App() {
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">Amazon Orders Feed Importer</h1>
+            <h1 className="text-2xl font-semibold">Importer ordini Amazon</h1>
             <p className="text-sm text-slate-600">
-              Sync orders and send custom fields to LightBurn.
+              Sincronizza ordini e invia campi personalizzati a LightBurn.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -784,7 +784,7 @@ export default function App() {
               onClick={handleSync}
               disabled={syncing}
             >
-              {syncing ? "Syncing..." : "Sync Now"}
+              {syncing ? "Aggiornando..." : "Aggiorna Ora"}
             </button>
           </div>
         </header>
@@ -867,7 +867,7 @@ export default function App() {
                 }`}
                 onClick={() => setFilterMode('pending')}
               >
-                To Do
+                Da Stampare
               </button>
               <button
                 className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -877,14 +877,14 @@ export default function App() {
                 }`}
                 onClick={() => setFilterMode('all')}
               >
-                All History
+                Tutti gli Ordini (Completati e Da Stampare)
               </button>
             </div>
             <div className="flex items-center gap-3">
               <input
                 ref={searchInputRef}
                 className="w-64 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Search Order ID (e.g. AMZ-1001)"
+                placeholder="Cerca ordine con ID (e.g. AMZ-1001)"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
@@ -954,8 +954,8 @@ export default function App() {
                   ) : displayedOrders.length === 0 ? (
                     renderEmptyState(
                       activeSearchTerm
-                        ? `No orders found for ${activeSearchTerm}.`
-                        : "No orders found."
+                        ? `Non ci sono ordini con ID: ${activeSearchTerm}.`
+                        : "Non ci sono ordini."
                     )
                   ) : (
                     displayedOrders.map(order => (
