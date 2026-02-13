@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     console.log(`Electron: Loading Window at ${localUrl}`);
     
     // Create the browser window and load the server
-    createWindow(localUrl);  // ✅ FIXED - Use localUrl instead of address
+    createWindow(address);
   } catch (error) {
     console.error('Electron: Failed to start server:', error);
     app.quit();
