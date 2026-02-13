@@ -12,7 +12,7 @@ import { and, eq, like, ne, sql } from "drizzle-orm";
 import { runMigrations } from "./migrate.js";
 import { db } from "./db.js";
 import { orders, templateRules, assetRules, Order } from "./schema.js";
-import { syncOrders } from "./sync.js";
+import { syncOrders, startBackgroundHydration } from "./sync.js";
 import { generateLightBurnProject, hasRetroTemplate } from "./lightburn.js";
 import { logger, logError } from "./logger.js";
 import { config } from "./config.js";
@@ -384,6 +384,10 @@ app.post("/sync", async (request, reply) => {
       },
       "Sync completed successfully"
     );
+    
+    // Start background hydration of Amazon Custom data (non-blocking)
+    startBackgroundHydration();
+    
     return result;
   } catch (error) {
     logError(error, { operation: "sync" });
@@ -1457,6 +1461,9 @@ export async function startServer(overridePort?: number) {
   const address = await app.listen({ port, host: "0.0.0.0" });
   
   logger.info({ port, host: "0.0.0.0", address }, `Server listening on ${address}`);
+  
+  // Start background hydration to pick up any unfinished jobs from a restart
+  startBackgroundHydration();
   
   return {
     app,

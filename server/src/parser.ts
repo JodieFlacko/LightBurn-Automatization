@@ -26,7 +26,12 @@ export const HEADER_ALIASES = {
   status: ["status", "orderstatus"],
   customField: ["custom", "customfield", "customfieldvalue"],
   sku: ["sku", "itemsku", "productsku"],
-  buyerName: ["buyername", "buyer", "customername"]
+  buyerName: ["buyername", "buyer", "customername"],
+  zipUrl: [
+    "customizedurl",      // matches: customized-url, customized_url, customized url, customizedurl
+    "zipurl",             // matches: zip-url, zipurl
+    "customizationurl"    // matches: customization-url
+  ]
 } as const;
 
 const normalizedRecordSchema = z.object({
@@ -36,6 +41,7 @@ const normalizedRecordSchema = z.object({
   customField: z.string().optional(),
   sku: z.string().optional(),
   buyerName: z.string().optional(),
+  zipUrl: z.string().optional(),
   raw: z.string()
 });
 
@@ -103,6 +109,7 @@ export function normalizeRecord(
   const sku = overrides.sku ?? getByAliases(HEADER_ALIASES.sku);
   const buyerName =
     overrides.buyerName ?? getByAliases(HEADER_ALIASES.buyerName);
+  const zipUrl = overrides.zipUrl ?? getByAliases(HEADER_ALIASES.zipUrl);
   const raw = overrides.raw ?? JSON.stringify(record);
 
   return normalizedRecordSchema.parse({
@@ -112,6 +119,7 @@ export function normalizeRecord(
     customField,
     sku,
     buyerName,
+    zipUrl,
     raw
   });
 }

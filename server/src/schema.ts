@@ -26,6 +26,19 @@ export const orders = sqliteTable("orders", {
   retroAttemptCount: integer("retro_attempt_count").notNull().default(0),
   retroProcessedAt: text("retro_processed_at"),
   
+  // Amazon Custom data
+  zipUrl: text("zip_url"),
+  designName: text("design_name"),
+  fontFamily: text("font_family"),
+  colorName: text("color_name"),
+  frontText: text("front_text"),
+  backText1: text("back_text1"),
+  backText2: text("back_text2"),
+  backText3: text("back_text3"),
+  backText4: text("back_text4"),
+  customDataSynced: integer("custom_data_synced").notNull().default(0),
+  customDataError: text("custom_data_error"),
+  
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });

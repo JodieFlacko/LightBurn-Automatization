@@ -43,6 +43,13 @@
       "when": 1770472499120,
       "tag": "0005_boring_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1770991514619,
+      "tag": "0006_violet_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

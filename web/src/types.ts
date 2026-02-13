@@ -14,6 +14,18 @@ export type Order = {
   errorMessage?: string | null;
   processedAt?: string | null;
   attemptCount?: number;
+  // Amazon Custom fields
+  zipUrl: string | null;
+  designName: string | null;
+  fontFamily: string | null;
+  colorName: string | null;
+  frontText: string | null;
+  backText1: string | null;
+  backText2: string | null;
+  backText3: string | null;
+  backText4: string | null;
+  customDataSynced: number | null;
+  customDataError: string | null;
   // Front side fields
   fronteStatus: 'pending' | 'processing' | 'printed' | 'error';
   fronteErrorMessage?: string | null;

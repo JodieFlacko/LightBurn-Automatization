@@ -217,17 +217,43 @@ export default function OrderRow({
         {order.sku ?? "-"}
       </td>
       <td className="px-4 py-3 text-slate-600 w-48 text-left align-middle">
-        {hasCustomField ? (
-          order.customField
+        {(order.frontText || order.designName) ? (
+          <div className="flex flex-col gap-1">
+            {order.designName && (
+              <div className="font-semibold text-indigo-700">{order.designName}</div>
+            )}
+            {order.frontText && (
+              <div className="text-xs text-slate-700">
+                <span className="font-medium">Front:</span> {order.frontText}
+              </div>
+            )}
+            {order.backText1 && (
+              <div className="text-xs text-slate-700">
+                <span className="font-medium">Back:</span> {order.backText1}
+              </div>
+            )}
+            {order.fontFamily && (
+              <div className="text-xs text-slate-500">{order.fontFamily}</div>
+            )}
+          </div>
+        ) : order.zipUrl && order.customDataSynced !== 1 ? (
+          <span className="inline-flex items-center gap-1.5 text-xs text-amber-600">
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+            ⏳ Downloading...
+          </span>
+        ) : hasCustomField ? (
+          <div className="text-sm">{order.customField}</div>
         ) : (
           <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
-            Standard Order
+            Standard
           </span>
         )}
       </td>
       <td className="px-4 py-3 w-20 text-center align-middle">
         <div className="flex items-center justify-center">
-          {order.detectedColor ? (
+          {order.colorName ? (
+            <span className="font-semibold text-slate-700">{order.colorName}</span>
+          ) : order.detectedColor ? (
             <div 
               className="h-6 w-6 rounded-full border-2 border-slate-300"
               style={{ backgroundColor: order.detectedColor }}

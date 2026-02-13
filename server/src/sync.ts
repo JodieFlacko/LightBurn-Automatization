@@ -3,13 +3,15 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
-import { notInArray, eq, sql } from "drizzle-orm";
+import { notInArray, eq, sql, and, isNotNull } from "drizzle-orm";
+import pLimit from "p-limit";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
 import { getByPath, normalizeRecord } from "./parser.js";
 import { logger, logError } from "./logger.js";
 import { hasRetroTemplate } from "./lightburn.js";
 import { config } from "./config.js";
+import { processCustomZip } from "./amazon-custom.js";
 
 type SyncResult = {
   added: number;
@@ -190,6 +192,7 @@ export async function syncOrders(): Promise<SyncResult> {
         customField: normalized.customField ?? null,
         sku: normalized.sku ?? null,
         buyerName: normalized.buyerName ?? null,
+        zipUrl: normalized.zipUrl ?? null,
         raw: normalized.raw
       })
       .onConflictDoNothing()
@@ -313,4 +316,143 @@ export async function syncOrders(): Promise<SyncResult> {
   );
 
   return { added, duplicates, deleted, skipped, totalParsed };
+}
+
+/**
+ * Flag to prevent multiple concurrent background hydration runs
+ */
+let isHydrationRunning = false;
+
+/**
+ * Background task that hydrates Amazon Custom data for orders with zipUrl.
+ * Processes orders concurrently (max 5 at a time) for optimal performance.
+ * Safe to call multiple times - will skip if already running.
+ */
+export function startBackgroundHydration(): void {
+  if (isHydrationRunning) {
+    logger.info("Background hydration already in progress, skipping");
+    return;
+  }
+
+  // Start the hydration process asynchronously (don't await)
+  hydrateCustomData().catch((error) => {
+    logError(error, { operation: "background_hydration" });
+  });
+}
+
+/**
+ * Internal function that performs the actual hydration work
+ */
+async function hydrateCustomData(): Promise<void> {
+  isHydrationRunning = true;
+  
+  try {
+    logger.info("Starting background Amazon Custom data hydration");
+
+    // Find orders that have zipUrl but haven't been synced yet
+    const ordersToHydrate = await db
+      .select()
+      .from(orders)
+      .where(
+        and(
+          isNotNull(orders.zipUrl),
+          eq(orders.customDataSynced, 0)
+        )
+      )
+      .all();
+
+    if (ordersToHydrate.length === 0) {
+      logger.info("No orders require Amazon Custom data hydration");
+      return;
+    }
+
+    logger.info(
+      { count: ordersToHydrate.length },
+      `Found ${ordersToHydrate.length} order(s) requiring Custom data hydration`
+    );
+
+    // Set concurrency limit (max 5 concurrent downloads)
+    const limit = pLimit(5);
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Process orders concurrently with p-limit
+    const promises = ordersToHydrate.map((order) =>
+      limit(async () => {
+        try {
+          logger.info(
+            { orderId: order.orderId, zipUrl: order.zipUrl },
+            `Hydrating Amazon Custom data for order ${order.orderId}`
+          );
+
+          // Download and parse the Amazon Custom ZIP
+          const customData = await processCustomZip(order.zipUrl!);
+
+          // Update the order with the extracted custom data
+          await db
+            .update(orders)
+            .set({
+              designName: customData.designName,
+              fontFamily: customData.fontFamily,
+              colorName: customData.colorName,
+              frontText: customData.frontText,
+              backText1: customData.backText1,
+              backText2: customData.backText2,
+              backText3: customData.backText3,
+              backText4: customData.backText4,
+              customDataSynced: 1,
+              customDataError: null, // Clear any previous error
+              updatedAt: sql`CURRENT_TIMESTAMP`
+            })
+            .where(eq(orders.orderId, order.orderId))
+            .run();
+
+          successCount++;
+          logger.info(
+            { orderId: order.orderId, customData },
+            `Successfully hydrated Amazon Custom data for order ${order.orderId}`
+          );
+        } catch (error) {
+          errorCount++;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
+          logger.error(
+            { orderId: order.orderId, error: errorMessage },
+            `Failed to hydrate Amazon Custom data for order ${order.orderId}`
+          );
+
+          // Mark the order with the error but don't stop processing others
+          try {
+            await db
+              .update(orders)
+              .set({
+                customDataError: errorMessage,
+                updatedAt: sql`CURRENT_TIMESTAMP`
+              })
+              .where(eq(orders.orderId, order.orderId))
+              .run();
+          } catch (updateError) {
+            logger.error(
+              { orderId: order.orderId, error: updateError },
+              "Failed to update order with error message"
+            );
+          }
+        }
+      })
+    );
+
+    // Wait for all concurrent operations to complete
+    await Promise.all(promises);
+
+    logger.info(
+      { 
+        total: ordersToHydrate.length, 
+        success: successCount, 
+        errors: errorCount 
+      },
+      "Background Amazon Custom data hydration completed"
+    );
+  } finally {
+    isHydrationRunning = false;
+  }
 }
