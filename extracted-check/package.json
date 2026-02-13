@@ -1,0 +1,26 @@
+{
+  "name": "amazon-orders-feed-importer",
+  "version": "1.0.0",
+  "description": "Victoria Laser Automation App",
+  "author": "Victoria Laser",
+  "private": true,
+  "main": "electron/main.js",
+  "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264",
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "@fastify/static": "^7.0.4",
+    "better-sqlite3": "^12.6.2",
+    "cheerio": "^1.2.0",
+    "conf": "^15.1.0",
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.33.0",
+    "fast-xml-parser": "^5.3.3",
+    "fastify": "^4.28.1",
+    "fs-extra": "^11.3.3",
+    "is-wsl": "^3.1.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.23.8"
+  }
+}

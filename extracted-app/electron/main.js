@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
-const isDev = !app.isPackaged;
+import isDev from 'electron-is-dev';
 import { startServer } from '../server/dist/src/index.js';
 
 let mainWindow;
@@ -58,10 +58,6 @@ app.whenReady().then(async () => {
     serverApp = fastifyApp;
     
     console.log(`Electron: Server started at ${address} (port ${port})`);
-
-    // ✅ FIX: Replace 0.0.0.0 with 127.0.0.1 for Windows
-    const localUrl = address.replace('0.0.0.0', '127.0.0.1');
-    console.log(`Electron: Loading URL ${localUrl}`);
     
     // Create the browser window and load the server
     createWindow(address);
