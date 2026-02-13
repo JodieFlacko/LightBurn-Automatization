@@ -538,17 +538,33 @@ const handleSideProcessing = async (
 
   // ==================== PHASE 1: PRE-FLIGHT VALIDATION ====================
   
-  // Check if retro is not required
+  // Check if retro is not required (but allow if there's actual retro custom data)
   if (side === 'retro' && currentStatus === 'not_required') {
-    logger.warn(
-      { orderId, status: currentStatus },
-      "Retro processing requested but retro is not required for this order"
+    // Check if order has Amazon Custom retro data
+    const hasRetroCustomData = Boolean(
+      order.backText1 || 
+      order.backText2 || 
+      order.backText3 || 
+      order.backText4
     );
-    reply.code(400);
-    return {
-      error: "Retro side is not required for this order",
-      status: currentStatus
-    };
+    
+    if (!hasRetroCustomData) {
+      logger.warn(
+        { orderId, status: currentStatus },
+        "Retro processing requested but retro is not required for this order"
+      );
+      reply.code(400);
+      return {
+        error: "Retro side is not required for this order",
+        status: currentStatus
+      };
+    } else {
+      // Has retro custom data, allow processing and update status from not_required to pending
+      logger.info(
+        { orderId, backText1: order.backText1, backText2: order.backText2 },
+        "Retro marked as not_required but has custom data, allowing processing"
+      );
+    }
   }
   
   // Check if side is already being processed

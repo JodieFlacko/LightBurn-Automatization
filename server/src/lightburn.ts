@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { exec, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -11,6 +12,16 @@ import { config, IS_WSL } from "./config.js";
 
 const execPromise = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Asset Paths for Design Images
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Path for Node.js (running in WSL) to verify file existence
+const WSL_ASSETS_PATH = '/mnt/c/Users/peppe/OneDrive/Documenti/Victoria/LightBurn/Assets/Pattern PNGs';
+
+// Path for LightBurn (running in Windows) to actually load the file
+const WIN_ASSETS_PATH = 'C:\\Users\\peppe\\OneDrive\\Documenti\\Victoria\\LightBurn\\Assets\\Pattern PNGs';
 
 /**
  * Normalize file path for Windows execution.
@@ -55,6 +66,13 @@ interface Order {
   buyerName: string | null;
   customField: string | null;
   sku: string | null;
+  frontText?: string | null;
+  fontFamily?: string | null;
+  designName?: string | null;
+  backText1?: string | null;
+  backText2?: string | null;
+  backText3?: string | null;
+  backText4?: string | null;
 }
 
 interface LightBurnResult {
@@ -556,6 +574,34 @@ export async function hasRetroTemplate(sku: string | null): Promise<boolean> {
 }
 
 /**
+ * Find design image path from Assets folder
+ * Searches for image file matching the design name with common extensions
+ * @param designName - The design name to search for
+ * @returns Object with WSL and Windows paths, or null if not found
+ */
+function findDesignImagePath(designName: string): { wslPath: string; winPath: string } | null {
+  if (!designName) return null;
+  
+  const sanitized = designName.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const extensions = ['.png', '.jpg', '.jpeg', '.svg'];
+  
+  for (const ext of extensions) {
+    const filename = `${sanitized}${ext}`;
+    const wslPath = path.join(WSL_ASSETS_PATH, filename);
+    
+    if (fsSync.existsSync(wslPath)) {
+      return {
+        wslPath: wslPath,
+        winPath: path.join(WIN_ASSETS_PATH, filename).replace(/\//g, '\\'),
+      };
+    }
+  }
+  
+  logger.warn({ designName, searchPath: WSL_ASSETS_PATH }, 'Design image not found');
+  return null;
+}
+
+/**
  * Generate a LightBurn project file from a template by injecting order data
  * @param order - The order data containing buyer information
  * @param defaultTemplatePath - Path to the default LightBurn template file (legacy, now ignored)
@@ -618,19 +664,96 @@ export async function generateLightBurnProject(
     // Parse XML with cheerio in XML mode
     const $ = cheerio.load(templateContent, { xmlMode: true });
 
-    // Find the Shape element with Name="{{CUSTOMER_NAME}}" and update the Str attribute
-    const customerShape = $('Shape[Name="{{CUSTOMER_NAME}}"]');
-    
-    if (customerShape.length === 0) {
-      throw new Error('Template does not contain a Shape with Name="{{CUSTOMER_NAME}}"');
+    // Handle text injection based on side
+    if (side === 'retro') {
+      // Retro side: Update 4 separate text fields
+      const retroTexts = [
+        { placeholder: '{{Text_Field_1}}', text: order.backText1 },
+        { placeholder: '{{Text_Field_2}}', text: order.backText2 },
+        { placeholder: '{{Text_Field_3}}', text: order.backText3 },
+        { placeholder: '{{Text_Field_4}}', text: order.backText4 }
+      ];
+      
+      retroTexts.forEach((field, index) => {
+        const shape = $(`Shape[Name="${field.placeholder}"]`);
+        
+        if (shape.length > 0) {
+          shape.attr('Str', field.text || '');
+          
+          // Apply custom font to retro text fields if provided
+          if (order.fontFamily) {
+            const currentFont = shape.attr('Font') || '';
+            const fontParts = currentFont.split(',');
+            
+            if (fontParts.length > 1) {
+              // Preserve existing font styling (size, weight, etc.)
+              fontParts[0] = order.fontFamily;
+              shape.attr('Font', fontParts.join(','));
+            } else {
+              // No existing styling, just set the font
+              shape.attr('Font', order.fontFamily);
+            }
+          }
+          
+          logger.info({ 
+            orderId: order.orderId, 
+            field: field.placeholder, 
+            text: field.text,
+            font: order.fontFamily 
+          }, 'Retro text field injected');
+        } else {
+          logger.warn({ orderId: order.orderId, field: field.placeholder }, 'Retro text field placeholder not found in template');
+        }
+      });
+    } else {
+      // Front side: Single text field with legacy fallback
+      const textToEngrave = order.frontText || extractEngravingName(order.customField);
+      const customerShape = $('Shape[Name="{{CUSTOMER_NAME}}"]');
+
+      if (customerShape.length > 0) {
+        customerShape.attr('Str', textToEngrave);
+        
+        // Apply custom font for front side if provided
+        if (order.fontFamily) {
+          const currentFont = customerShape.attr('Font') || '';
+          const fontParts = currentFont.split(',');
+          
+          if (fontParts.length > 1) {
+            // Preserve existing font styling (size, weight, etc.)
+            fontParts[0] = order.fontFamily;
+            customerShape.attr('Font', fontParts.join(','));
+            logger.info({ orderId: order.orderId, font: order.fontFamily }, 'Font injected with preserved styling');
+          } else {
+            // No existing styling, just set the font
+            customerShape.attr('Font', order.fontFamily);
+          }
+        }
+        
+        logger.info({ textToEngrave, orderId: order.orderId }, "Front text injected into template");
+      }
     }
 
-    // Extract the engraving name from the custom field
-    const engravingName = extractEngravingName(order.customField);
-    logger.info({ engravingName, orderId: order.orderId }, "Extracted engraving name");
-    customerShape.attr("Str", engravingName);
+    // Inject design image for front side if designName is provided
+    if (side === 'front' && order.designName) {
+      const foundPaths = findDesignImagePath(order.designName);
+      
+      if (foundPaths) {
+        const designShape = $('Shape[Name="{{DESIGN_IMAGE}}"]');
+        
+        if (designShape.length > 0) {
+          // The Magic Fix: Set File, empty Data, reset SourceHash
+          designShape.attr('File', foundPaths.winPath);
+          designShape.attr('Data', '');
+          designShape.attr('SourceHash', '0');
+          
+          logger.info({ orderId: order.orderId, designName: order.designName, imagePath: foundPaths.winPath }, 'Design image injected');
+        } else {
+          logger.warn({ orderId: order.orderId, designName: order.designName }, 'No {{DESIGN_IMAGE}} shape found in template');
+        }
+      }
+    }
 
-    // Detect assets from custom field
+    // Detect assets from custom field (legacy fallback)
     const detectedAssets = await detectAssets(order.customField);
 
     // Handle image asset (copy and swap)
@@ -663,12 +786,27 @@ export async function generateLightBurnProject(
       logger.debug({ orderId: order.orderId }, "No image asset detected");
     }
 
-    // Handle font asset
+    // Handle font asset (legacy fallback)
     if (detectedAssets.fontAsset) {
-      customerShape.attr("Font", detectedAssets.fontAsset);
+      // Apply font to the appropriate shape(s) based on side
+      if (side === 'retro') {
+        // Apply to all 4 retro text fields
+        for (let i = 1; i <= 4; i++) {
+          const shape = $(`Shape[Name="{{Text_Field_${i}}}"]`);
+          if (shape.length > 0) {
+            shape.attr("Font", detectedAssets.fontAsset);
+          }
+        }
+      } else {
+        // Apply to front text field
+        const shape = $('Shape[Name="{{CUSTOMER_NAME}}"]');
+        if (shape.length > 0) {
+          shape.attr("Font", detectedAssets.fontAsset);
+        }
+      }
       logger.info(
-        { font: detectedAssets.fontAsset, orderId: order.orderId },
-        "Font applied to text shape"
+        { font: detectedAssets.fontAsset, orderId: order.orderId, side },
+        "Legacy font asset applied to text shape(s)"
       );
     }
 

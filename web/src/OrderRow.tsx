@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { Order } from "./types";
+import CustomDataModal from "./components/CustomDataModal";
 
 type OrderRowProps = {
   order: Order;
@@ -21,10 +23,30 @@ export default function OrderRow({
   onErrorClick,
   onDiscardClick
 }: OrderRowProps) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
   const isExactMatch =
     activeSearchTerm.length > 0 &&
     order.orderId === activeSearchTerm;
-  const hasCustomField = Boolean(order.customField && order.customField.trim());
+  
+  // Check if order has custom data for FRONT side (Amazon Custom or legacy)
+  const hasFrontCustomData = Boolean(
+    order.frontText || 
+    order.designName || 
+    (order.customField && order.customField.trim())
+  );
+  
+  // Check if order has custom data for RETRO side (Amazon Custom or legacy with retro template)
+  const hasRetroCustomData = Boolean(
+    order.backText1 || 
+    order.backText2 || 
+    order.backText3 || 
+    order.backText4 ||
+    (order.customField && order.customField.trim() && order.retroStatus !== 'not_required')
+  );
+  
+  // Legacy check for backward compatibility
+  const hasCustomField = hasFrontCustomData;
   
   // Row background: amber for exact match, dim for both sides printed, white for pending
   const bothSidesPrinted = order.fronteStatus === 'printed' && 
@@ -128,12 +150,15 @@ export default function OrderRow({
     sideErrorMessage: string | null | undefined,
     sideAttemptCount: number | undefined
   ) => {
-    // Retro not required - show N/A
-    if (side === 'retro' && sideStatus === 'not_required') {
-      return <span className="text-slate-400">N/A</span>;
-    }
-
-    if (!hasCustomField) {
+    // Check if this side has custom data FIRST (before checking not_required status)
+    const hasCustomDataForSide = side === 'front' ? hasFrontCustomData : hasRetroCustomData;
+    
+    if (!hasCustomDataForSide) {
+      // No custom data for this side
+      // For retro: show N/A if marked as not_required, otherwise show dash
+      if (side === 'retro' && sideStatus === 'not_required') {
+        return <span className="text-slate-400">N/A</span>;
+      }
       return <span className="text-slate-400">-</span>;
     }
 
@@ -206,10 +231,11 @@ export default function OrderRow({
   };
   
   return (
-    <tr
-      key={order.id}
-      className={rowClassName}
-    >
+    <>
+      <tr
+        key={order.id}
+        className={rowClassName}
+      >
       <td className="px-4 py-3 font-medium text-slate-700 w-32 text-left align-middle">
         {order.orderId}
       </td>
@@ -218,22 +244,27 @@ export default function OrderRow({
       </td>
       <td className="px-4 py-3 text-slate-600 w-48 text-left align-middle">
         {(order.frontText || order.designName) ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors w-fit"
+              title="View customization details"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              View Customization
+            </button>
             {order.designName && (
-              <div className="font-semibold text-indigo-700">{order.designName}</div>
+              <span className="text-xs text-slate-600">
+                <span className="font-medium">Design:</span> {order.designName}
+              </span>
             )}
-            {order.frontText && (
-              <div className="text-xs text-slate-700">
-                <span className="font-medium">Front:</span> {order.frontText}
-              </div>
-            )}
-            {order.backText1 && (
-              <div className="text-xs text-slate-700">
-                <span className="font-medium">Back:</span> {order.backText1}
-              </div>
-            )}
-            {order.fontFamily && (
-              <div className="text-xs text-slate-500">{order.fontFamily}</div>
+            {!order.designName && order.frontText && (
+              <span className="text-xs text-slate-600 truncate" title={order.frontText}>
+                {order.frontText}
+              </span>
             )}
           </div>
         ) : order.zipUrl && order.customDataSynced !== 1 ? (
@@ -300,5 +331,13 @@ export default function OrderRow({
         </td>
       )}
     </tr>
+    
+    {/* Custom Data Modal */}
+    <CustomDataModal
+      isOpen={isModalOpen}
+      onClose={() => setIsModalOpen(false)}
+      order={order}
+    />
+    </>
   );
 }
