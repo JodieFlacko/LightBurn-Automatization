@@ -719,11 +719,21 @@ export default function App() {
 
   // Split orders into rework and new categories (only for "To Do" view)
   const isReworkOrder = (order: Order) => {
-    return Boolean(
-      order.processedAt || 
-      order.fronteProcessedAt || 
-      order.retroProcessedAt
-    );
+    // Only move to "Rework" section orders that were FULLY printed before
+    // (both sides completed) but are back in the queue for reprinting.
+    // This includes reprints with config errors OR reprints needing to be done again.
+    
+    // Check if both sides were fully printed at some point
+    const wasFronteFullyPrinted = Boolean(order.fronteProcessedAt);
+    const wasRetroFullyPrinted = Boolean(order.retroProcessedAt) || order.retroStatus === 'not_required';
+    
+    // If both sides were printed, this is a reprint scenario → Rework section
+    if (wasFronteFullyPrinted && wasRetroFullyPrinted) {
+      return true;
+    }
+
+    // All other orders (including new orders with config errors) → New Orders section
+    return false;
   };
 
   const reworkOrders = filterMode === 'pending' 
@@ -929,7 +939,7 @@ export default function App() {
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
                     </svg>
                     <h3 className="text-sm font-semibold text-slate-700">
-                      New Orders ({newOrders.length})
+                      Nuovi Ordini da Stampare ({newOrders.length})
                     </h3>
                   </div>
                   <div className="overflow-x-auto">
@@ -955,7 +965,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Rework / Attention Needed Section - Now Second & Collapsible */}
+              {/* Configuration Errors / Reprints Section - Collapsible */}
               <ReworkSection
                 orders={reworkOrders}
                 activeSearchTerm={activeSearchTerm}

@@ -419,8 +419,12 @@ app.get("/orders", async (request) => {
   }
 
   if (hasCustomField === true) {
+    // Include orders with either old-style custom_field OR Amazon Custom data
     conditions.push(
-      sql`${orders.customField} is not null and ${orders.customField} != ''`
+      sql`(
+        (${orders.customField} is not null and ${orders.customField} != '') OR
+        (${orders.customDataSynced} = 1)
+      )`
     );
   }
 
@@ -430,8 +434,18 @@ app.get("/orders", async (request) => {
   }
 
   if (excludeStatus) {
-    // Filter out orders with this status
-    conditions.push(ne(orders.status, excludeStatus));
+    // For side-specific filtering, exclude only if BOTH sides are complete
+    if (excludeStatus === 'printed') {
+      // Exclude orders where BOTH sides are done:
+      // - fronteStatus is 'printed' AND
+      // - retroStatus is either 'printed' OR 'not_required'
+      conditions.push(
+        sql`NOT (${orders.fronteStatus} = 'printed' AND (${orders.retroStatus} = 'printed' OR ${orders.retroStatus} = 'not_required'))`
+      );
+    } else {
+      // For other statuses, fall back to old behavior
+      conditions.push(ne(orders.status, excludeStatus));
+    }
   }
 
   const where = conditions.length ? and(...conditions) : undefined;
