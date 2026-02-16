@@ -181,6 +181,16 @@ export async function syncOrders(): Promise<SyncResult> {
       continue;
     }
 
+    // Skip orders without zipUrl (customized-url) - we only want customized orders
+    if (!normalized.zipUrl) {
+      skipped += 1;
+      logger.debug(
+        { orderId: normalized.orderId },
+        "Skipping order without customized-url (zipUrl)"
+      );
+      continue;
+    }
+
     incomingOrderIds.add(normalized.orderId);
 
     const result = db
@@ -312,7 +322,7 @@ export async function syncOrders(): Promise<SyncResult> {
       skipped, 
       totalParsed 
     },
-    "Order synchronization completed"
+    `Order synchronization completed (skipped ${skipped} orders without customized-url)`
   );
 
   return { added, duplicates, deleted, skipped, totalParsed };
