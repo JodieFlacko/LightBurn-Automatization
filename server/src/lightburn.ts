@@ -6,7 +6,7 @@ import { exec, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
 import { templateRules, assetRules } from "./schema.js";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { logger, logError } from "./logger.js";
 import { config, IS_WSL } from "./config.js";
 
@@ -16,12 +16,7 @@ const execFileAsync = promisify(execFile);
 // ─────────────────────────────────────────────────────────────────────────────
 // Asset Paths for Design Images
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Path for Node.js (running in WSL) to verify file existence
-const WSL_ASSETS_PATH = '/mnt/c/Users/peppe/OneDrive/Documenti/Victoria/LightBurn/Assets/Pattern PNGs';
-
-// Path for LightBurn (running in Windows) to actually load the file
-const WIN_ASSETS_PATH = 'C:\\Users\\peppe\\OneDrive\\Documenti\\Victoria\\LightBurn\\Assets\\Pattern PNGs';
+// (Now using config.paths.assets instead of hardcoded paths)
 
 /**
  * Normalize file path for Windows execution.
@@ -329,7 +324,7 @@ async function detectAssets(customField: string | null): Promise<DetectedAssets>
 /**
  * Copy image to temp directory
  * @param imageName - Name of the image file
- * @returns Path to the copied image
+ * @returns Windows-normalized path to the copied image (for LightBurn)
  */
 async function copyImageToTemp(imageName: string): Promise<string> {
   // Use config paths for assets and temp (native Windows paths)
@@ -340,7 +335,9 @@ async function copyImageToTemp(imageName: string): Promise<string> {
     await fs.copyFile(sourcePath, destPath);
     logger.info({ imageName, sourcePath, destPath }, "Image copied to temp directory");
     
-    return destPath;
+    // Return Windows-normalized path for LightBurn
+    const winPath = normalizePathForWindows(destPath);
+    return winPath;
   } catch (error) {
     logError(error, { imageName, sourcePath, operation: "copy_image" });
     throw new Error(`Failed to copy image ${imageName}`);
@@ -575,29 +572,69 @@ export async function hasRetroTemplate(sku: string | null): Promise<boolean> {
 
 /**
  * Find design image path from Assets folder
- * Searches for image file matching the design name with common extensions
+ * 1. First checks asset rules database for keyword match
+ * 2. Falls back to direct file search with common extensions
  * @param designName - The design name to search for
- * @returns Object with WSL and Windows paths, or null if not found
+ * @returns Windows path for LightBurn, or null if not found
  */
-function findDesignImagePath(designName: string): { wslPath: string; winPath: string } | null {
+async function findDesignImagePath(designName: string): Promise<string | null> {
   if (!designName) return null;
   
+  // ==================== PHASE 1: CHECK ASSET RULES ====================
+  // First check if there's an asset rule that maps this design name to a specific image
+  try {
+    const rules = await db.select().from(assetRules).where(eq(assetRules.assetType, 'image')).all();
+    const normalizedDesignName = designName.toLowerCase();
+    
+    for (const rule of rules) {
+      const normalizedKeyword = rule.triggerKeyword.toLowerCase();
+      if (normalizedDesignName.includes(normalizedKeyword)) {
+        // Found a matching rule! Use the specified image filename
+        const assetsPath = config.paths.assets;
+        const imagePath = path.join(assetsPath, rule.value);
+        
+        // Verify the file exists
+        if (fsSync.existsSync(imagePath)) {
+          const winPath = normalizePathForWindows(imagePath);
+          logger.info({ 
+            designName, 
+            matchedRule: rule.triggerKeyword, 
+            imageFile: rule.value,
+            winPath 
+          }, 'Design image found via asset rule');
+          return winPath;
+        } else {
+          logger.warn({ 
+            designName, 
+            matchedRule: rule.triggerKeyword, 
+            imageFile: rule.value,
+            searchPath: imagePath 
+          }, 'Asset rule matched but image file not found');
+        }
+      }
+    }
+  } catch (error) {
+    logError(error, { context: 'Asset rule lookup failed', designName });
+  }
+  
+  // ==================== PHASE 2: DIRECT FILE SEARCH ====================
+  // No asset rule matched, try to find the image file directly by name
   const sanitized = designName.replace(/[^a-zA-Z0-9 ]/g, '').trim();
   const extensions = ['.png', '.jpg', '.jpeg', '.svg'];
+  const assetsPath = config.paths.assets;
   
   for (const ext of extensions) {
     const filename = `${sanitized}${ext}`;
-    const wslPath = path.join(WSL_ASSETS_PATH, filename);
+    const imagePath = path.join(assetsPath, filename);
     
-    if (fsSync.existsSync(wslPath)) {
-      return {
-        wslPath: wslPath,
-        winPath: path.join(WIN_ASSETS_PATH, filename).replace(/\//g, '\\'),
-      };
+    if (fsSync.existsSync(imagePath)) {
+      const winPath = normalizePathForWindows(imagePath);
+      logger.info({ designName, filename, winPath }, 'Design image found via direct file search');
+      return winPath;
     }
   }
   
-  logger.warn({ designName, searchPath: WSL_ASSETS_PATH }, 'Design image not found');
+  logger.warn({ designName, searchPath: assetsPath }, 'Design image not found');
   return null;
 }
 
@@ -640,7 +677,7 @@ export async function generateLightBurnProject(
     logger.info({ matchedTemplate, side }, "Template matched for SKU");
     
     // Use config path for templates (native Windows path in Documents)
-    const templatePath = path.join(config.paths.templates, matchedTemplate);
+    const templatePath = path.join(config.getTemplatesPath(), matchedTemplate);
     
     // Check if the template file exists
     try {
@@ -735,18 +772,18 @@ export async function generateLightBurnProject(
 
     // Inject design image for front side if designName is provided
     if (side === 'front' && order.designName) {
-      const foundPaths = findDesignImagePath(order.designName);
+      const foundPath = await findDesignImagePath(order.designName);
       
-      if (foundPaths) {
+      if (foundPath) {
         const designShape = $('Shape[Name="{{DESIGN_IMAGE}}"]');
         
         if (designShape.length > 0) {
           // The Magic Fix: Set File, empty Data, reset SourceHash
-          designShape.attr('File', foundPaths.winPath);
+          designShape.attr('File', foundPath);
           designShape.attr('Data', '');
           designShape.attr('SourceHash', '0');
           
-          logger.info({ orderId: order.orderId, designName: order.designName, imagePath: foundPaths.winPath }, 'Design image injected');
+          logger.info({ orderId: order.orderId, designName: order.designName, imagePath: foundPath }, 'Design image injected');
         } else {
           logger.warn({ orderId: order.orderId, designName: order.designName }, 'No {{DESIGN_IMAGE}} shape found in template');
         }

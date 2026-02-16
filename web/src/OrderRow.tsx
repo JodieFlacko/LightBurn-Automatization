@@ -2,6 +2,13 @@ import { useState } from "react";
 import type { Order } from "./types";
 import CustomDataModal from "./components/CustomDataModal";
 
+type AssetRule = {
+  id: number;
+  triggerKeyword: string;
+  assetType: 'image' | 'color';
+  value: string;
+};
+
 type OrderRowProps = {
   order: Order;
   showDiscardColumn?: boolean;
@@ -11,6 +18,7 @@ type OrderRowProps = {
   onProcessSide: (orderId: string, side: 'front' | 'retro') => void;
   onErrorClick: (order: Order, side: 'front' | 'retro') => void;
   onDiscardClick?: (order: Order) => void;
+  assetRules: AssetRule[];
 };
 
 export default function OrderRow({
@@ -21,7 +29,8 @@ export default function OrderRow({
   processingRetroOrders,
   onProcessSide,
   onErrorClick,
-  onDiscardClick
+  onDiscardClick,
+  assetRules
 }: OrderRowProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -283,7 +292,26 @@ export default function OrderRow({
       <td className="px-4 py-3 w-20 text-center align-middle">
         <div className="flex items-center justify-center">
           {order.colorName ? (
-            <span className="font-semibold text-slate-700">{order.colorName}</span>
+            (() => {
+              // Look up color from asset rules
+              const colorRule = assetRules.find(
+                rule => rule.assetType === 'color' && 
+                        rule.triggerKeyword.toLowerCase() === order.colorName?.toLowerCase()
+              );
+              
+              if (colorRule) {
+                return (
+                  <div 
+                    className="h-6 w-6 rounded-full border-2 border-slate-300"
+                    style={{ backgroundColor: colorRule.value }}
+                    title={`${order.colorName} (${colorRule.value})`}
+                  />
+                );
+              }
+              
+              // Fallback to showing color name if no rule found
+              return <span className="font-semibold text-slate-700">{order.colorName}</span>;
+            })()
           ) : order.detectedColor ? (
             <div 
               className="h-6 w-6 rounded-full border-2 border-slate-300"

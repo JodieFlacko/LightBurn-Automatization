@@ -10,7 +10,7 @@ type TemplateRule = {
 type AssetRule = {
   id: number;
   triggerKeyword: string;
-  assetType: 'image' | 'font' | 'color';
+  assetType: 'image' | 'color';
   value: string;
 };
 
@@ -40,7 +40,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   
   // Asset rule form state
   const [triggerKeyword, setTriggerKeyword] = useState("");
-  const [assetType, setAssetType] = useState<'image' | 'font' | 'color'>('image');
+  const [assetType, setAssetType] = useState<'image' | 'color'>('image');
   const [assetValue, setAssetValue] = useState("");
 
   // General config state
@@ -628,11 +628,10 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                     <select
                       className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       value={assetType}
-                      onChange={(e) => setAssetType(e.target.value as 'image' | 'font' | 'color')}
+                      onChange={(e) => setAssetType(e.target.value as 'image' | 'color')}
                       disabled={saving}
                     >
                       <option value="image">Image</option>
-                      <option value="font">Font</option>
                       <option value="color">Color</option>
                     </select>
                   </div>
@@ -646,8 +645,6 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                       placeholder={
                         assetType === 'image' 
                           ? 'e.g., skull.png' 
-                          : assetType === 'font' 
-                          ? 'e.g., Arial,12,bold' 
                           : 'e.g., #ff0000'
                       }
                       value={assetValue}
@@ -656,7 +653,6 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                     />
                     <p className="mt-1 text-xs text-slate-500">
                       {assetType === 'image' && 'Filename in assets/ folder'}
-                      {assetType === 'font' && 'Font name'}
                       {assetType === 'color' && 'Hex color code'}
                     </p>
                   </div>

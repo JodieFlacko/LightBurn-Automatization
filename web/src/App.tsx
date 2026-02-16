@@ -12,6 +12,13 @@ type ViewState = {
   suggestedSku?: string | null;
 };
 
+type AssetRule = {
+  id: number;
+  triggerKeyword: string;
+  assetType: 'image' | 'color';
+  value: string;
+};
+
 // In production, use relative URLs (served from same origin)
 // In development, use explicit localhost URL
 const API_URL = import.meta.env.VITE_API_URL || 
@@ -277,6 +284,7 @@ export default function App() {
   const [errorModalSide, setErrorModalSide] = useState<'front' | 'retro' | null>(null);
   const [isConfigListOpen, setIsConfigListOpen] = useState(false);
   const [discardConfirmOrder, setDiscardConfirmOrder] = useState<Order | null>(null);
+  const [assetRules, setAssetRules] = useState<AssetRule[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
@@ -312,6 +320,16 @@ export default function App() {
     } finally {
       setLoading(false);
       setSearching(false);
+    }
+  };
+
+  const fetchAssetRules = async () => {
+    try {
+      const response = await fetch(`${API_URL}/settings/asset-rules`);
+      const data = await response.json();
+      setAssetRules(data.rules ?? []);
+    } catch (error) {
+      console.error("Failed to fetch asset rules:", error);
     }
   };
 
@@ -684,6 +702,10 @@ export default function App() {
     fetchOrders(debouncedSearchTerm, filterMode);
   }, [debouncedSearchTerm, filterMode]);
 
+  useEffect(() => {
+    fetchAssetRules();
+  }, []);
+
   const activeSearchTerm = debouncedSearchTerm.trim();
   const exactMatchOrder = activeSearchTerm
     ? orders.find((order) => order.orderId === activeSearchTerm)
@@ -924,6 +946,7 @@ export default function App() {
                             processingRetroOrders={processingRetroOrders}
                             onProcessSide={handleSideProcessing}
                             onErrorClick={handleErrorClick}
+                            assetRules={assetRules}
                           />
                         ))}
                       </tbody>
@@ -941,6 +964,7 @@ export default function App() {
                 onProcessSide={handleSideProcessing}
                 onErrorClick={handleErrorClick}
                 onDiscardClick={(order) => setDiscardConfirmOrder(order)}
+                assetRules={assetRules}
               />
             </div>
           ) : (
@@ -968,6 +992,7 @@ export default function App() {
                         processingRetroOrders={processingRetroOrders}
                         onProcessSide={handleSideProcessing}
                         onErrorClick={handleErrorClick}
+                        assetRules={assetRules}
                       />
                     ))
                   )}

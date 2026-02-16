@@ -2,6 +2,13 @@ import { useState } from "react";
 import OrderRow from "./OrderRow";
 import type { Order } from "./types";
 
+type AssetRule = {
+  id: number;
+  triggerKeyword: string;
+  assetType: 'image' | 'color';
+  value: string;
+};
+
 type ReworkSectionProps = {
   orders: Order[];
   activeSearchTerm?: string;
@@ -10,6 +17,7 @@ type ReworkSectionProps = {
   onProcessSide: (orderId: string, side: 'front' | 'retro') => void;
   onErrorClick: (order: Order, side: 'front' | 'retro') => void;
   onDiscardClick: (order: Order) => void;
+  assetRules: AssetRule[];
 };
 
 export default function ReworkSection({
@@ -19,7 +27,8 @@ export default function ReworkSection({
   processingRetroOrders,
   onProcessSide,
   onErrorClick,
-  onDiscardClick
+  onDiscardClick,
+  assetRules
 }: ReworkSectionProps) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -71,6 +80,7 @@ export default function ReworkSection({
                   onProcessSide={onProcessSide}
                   onErrorClick={onErrorClick}
                   onDiscardClick={onDiscardClick}
+                  assetRules={assetRules}
                 />
               ))}
             </tbody>

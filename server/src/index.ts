@@ -651,7 +651,7 @@ const handleSideProcessing = async (
   );
 
   // Use config path for templates directory (native Windows path)
-  const defaultTemplatePath = path.join(config.paths.templates, `targhetta-osso-${sideLabel}.lbrn2`);
+  const defaultTemplatePath = path.join(config.getTemplatesPath(), `targhetta-osso-${sideLabel}.lbrn2`);
 
   // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
   
@@ -949,7 +949,7 @@ const handleLightburn = async (request: { params: unknown }, reply: any) => {
   );
 
   // Use config path for templates directory (native Windows path)
-  const defaultTemplatePath = path.join(config.paths.templates, "targhetta-osso-fronte.lbrn2");
+  const defaultTemplatePath = path.join(config.getTemplatesPath(), "targhetta-osso-fronte.lbrn2");
 
   // ==================== PHASE 3: PROCESS WITH VERIFICATION ====================
   
