@@ -7,9 +7,12 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 ' Get the directory where this script is located
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
-' Build the path to the batch file
-batchFile = scriptDir & "\Start_Victoria_App.bat"
+' Build the path to the PowerShell script
+psScript = scriptDir & "\Start_Victoria_App.ps1"
 
-' Launch the batch file completely hidden
-' Window style 0 = Hidden (no window shown at all)
-WshShell.Run """" & batchFile & """", 0, False
+' Launch PowerShell script with hidden window
+' -ExecutionPolicy Bypass allows the script to run without policy restrictions
+' -WindowStyle Hidden keeps it completely invisible
+' -File specifies the script to run
+command = "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psScript & """"
+WshShell.Run command, 0, False

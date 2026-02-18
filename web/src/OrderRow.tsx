@@ -265,11 +265,6 @@ export default function OrderRow({
               </svg>
               View Customization
             </button>
-            {order.designName && (
-              <span className="text-xs text-slate-600">
-                <span className="font-medium">Design:</span> {order.designName}
-              </span>
-            )}
             {!order.designName && order.frontText && (
               <span className="text-xs text-slate-600 truncate" title={order.frontText}>
                 {order.frontText}
