@@ -268,6 +268,9 @@ function ErrorDetailsModal({
 }
 
 export default function App() {
+  // Generate a unique client ID on mount (persists across re-renders)
+  const clientId = useRef(crypto.randomUUID()).current;
+  
   const [viewState, setViewState] = useState<ViewState>({ view: "orders" });
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
@@ -287,6 +290,57 @@ export default function App() {
   const [assetRules, setAssetRules] = useState<AssetRule[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
+
+  // ==================== GRACEFUL SHUTDOWN: HEARTBEAT SYSTEM ====================
+  // Send periodic heartbeat to server to indicate this client is alive
+  useEffect(() => {
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        await fetch(`${API_URL}/api/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId })
+        });
+      } catch (error) {
+        // Silent fail - if server is down, we can't do anything anyway
+        console.warn('Heartbeat failed:', error);
+      }
+    }, 5000); // Send heartbeat every 5 seconds
+    
+    return () => clearInterval(heartbeatInterval);
+  }, [clientId]);
+  
+  // ==================== GRACEFUL SHUTDOWN: EXPLICIT DISCONNECT ====================
+  // Signal server when tab closes or refreshes
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable delivery during page unload
+      // sendBeacon is specifically designed to survive page navigation/close
+      const payload = JSON.stringify({ clientId });
+      
+      try {
+        // Primary method: sendBeacon (most reliable)
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(`${API_URL}/api/shutdown`, blob);
+      } catch {
+        // Fallback for browsers that don't support sendBeacon (rare)
+        fetch(`${API_URL}/api/shutdown`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true // Ensures request completes even if page unloads
+        }).catch(() => {
+          // Silent fail - heartbeat timeout will eventually catch this
+        });
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [clientId]);
 
   // Find configuration errors for banner (check both front and retro)
   const configErrorOrders = orders.filter(o => 

@@ -21,6 +21,21 @@ import { config } from "./config.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ==================== GRACEFUL SHUTDOWN SYSTEM ====================
+
+type ClientConnection = {
+  id: string;
+  lastHeartbeat: number;
+};
+
+const activeClients = new Map<string, ClientConnection>();
+const HEARTBEAT_TIMEOUT = 15000; // 15 seconds without heartbeat = client considered dead
+const HEARTBEAT_CHECK_INTERVAL = 5000; // Check for stale clients every 5 seconds
+const SHUTDOWN_GRACE_PERIOD = 5000; // 5 seconds grace period to avoid "Refresh Trap"
+
+let heartbeatMonitor: NodeJS.Timeout | null = null;
+let shutdownTimer: NodeJS.Timeout | null = null;
+
 const app = Fastify({ 
   logger: {
     level: "info",
@@ -59,6 +74,171 @@ await app.register(fastifyStatic, {
   root: join(__dirname, '../public'),
   prefix: "/",
 });
+
+// ==================== GRACEFUL SHUTDOWN ENDPOINTS ====================
+
+/**
+ * Heartbeat endpoint - clients send periodic pings to indicate they're still alive
+ */
+app.post("/api/heartbeat", async (request, reply) => {
+  const bodySchema = z.object({
+    clientId: z.string()
+  });
+  
+  try {
+    const { clientId } = bodySchema.parse(request.body);
+    
+    activeClients.set(clientId, {
+      id: clientId,
+      lastHeartbeat: Date.now()
+    });
+    
+    // Cancel any pending shutdown since we have an active client
+    if (shutdownTimer) {
+      logger.info({ clientId }, "Active client detected, canceling pending shutdown");
+      clearTimeout(shutdownTimer);
+      shutdownTimer = null;
+    }
+    
+    return { success: true, activeClients: activeClients.size };
+  } catch (error) {
+    reply.code(400);
+    return { error: "Invalid request" };
+  }
+});
+
+/**
+ * Shutdown endpoint - called when a client explicitly disconnects (e.g., tab close)
+ */
+app.post("/api/shutdown", async (request, reply) => {
+  const bodySchema = z.object({
+    clientId: z.string()
+  });
+  
+  try {
+    const { clientId } = bodySchema.parse(request.body);
+    
+    // Remove this client
+    activeClients.delete(clientId);
+    
+    logger.info({ clientId, remainingClients: activeClients.size }, 
+      "Client requested disconnect");
+    
+    reply.send({ success: true });
+    
+    // If no more clients, schedule shutdown with grace period
+    if (activeClients.size === 0) {
+      logger.info(
+        { gracePeriodMs: SHUTDOWN_GRACE_PERIOD }, 
+        "No active clients remaining, scheduling shutdown (allows time for page refresh)"
+      );
+      
+      // Cancel any existing shutdown timer
+      if (shutdownTimer) {
+        clearTimeout(shutdownTimer);
+      }
+      
+      // Schedule shutdown after grace period
+      shutdownTimer = setTimeout(() => {
+        // Double-check no clients reconnected during grace period
+        if (activeClients.size === 0) {
+          logger.info("Grace period expired with no reconnection, shutting down...");
+          performGracefulShutdown();
+        } else {
+          logger.info({ activeClients: activeClients.size }, 
+            "Client reconnected during grace period, shutdown canceled");
+          shutdownTimer = null;
+        }
+      }, SHUTDOWN_GRACE_PERIOD);
+    }
+    
+    return;
+  } catch (error) {
+    reply.code(400);
+    return { error: "Invalid request" };
+  }
+});
+
+/**
+ * Start background monitoring for stale client connections
+ */
+function startHeartbeatMonitor() {
+  heartbeatMonitor = setInterval(() => {
+    const now = Date.now();
+    let hasStaleClients = false;
+    
+    // Remove stale clients
+    for (const [clientId, client] of activeClients.entries()) {
+      if (now - client.lastHeartbeat > HEARTBEAT_TIMEOUT) {
+        logger.warn({ clientId, staleDuration: now - client.lastHeartbeat }, 
+          "Client heartbeat timeout, removing");
+        activeClients.delete(clientId);
+        hasStaleClients = true;
+      }
+    }
+    
+    // If all clients are gone, schedule shutdown with grace period
+    if (hasStaleClients && activeClients.size === 0 && !shutdownTimer) {
+      logger.info(
+        { gracePeriodMs: SHUTDOWN_GRACE_PERIOD },
+        "All clients disconnected (heartbeat timeout), scheduling shutdown"
+      );
+      
+      shutdownTimer = setTimeout(() => {
+        if (activeClients.size === 0) {
+          logger.info("Grace period expired with no reconnection, shutting down...");
+          performGracefulShutdown();
+        } else {
+          logger.info({ activeClients: activeClients.size }, 
+            "Client reconnected during grace period, shutdown canceled");
+          shutdownTimer = null;
+        }
+      }, SHUTDOWN_GRACE_PERIOD);
+    }
+  }, HEARTBEAT_CHECK_INTERVAL);
+  
+  logger.info(
+    { 
+      heartbeatTimeout: HEARTBEAT_TIMEOUT, 
+      checkInterval: HEARTBEAT_CHECK_INTERVAL,
+      gracePeriod: SHUTDOWN_GRACE_PERIOD 
+    }, 
+    "Heartbeat monitor started"
+  );
+}
+
+/**
+ * Perform graceful shutdown of the server
+ */
+async function performGracefulShutdown() {
+  logger.info("Starting graceful shutdown sequence...");
+  
+  // Stop monitoring
+  if (heartbeatMonitor) {
+    clearInterval(heartbeatMonitor);
+    heartbeatMonitor = null;
+  }
+  
+  if (shutdownTimer) {
+    clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+  }
+  
+  try {
+    // Close the Fastify server gracefully
+    await app.close();
+    logger.info("Server closed successfully");
+  } catch (error) {
+    logError(error, { operation: "graceful_shutdown" });
+  } finally {
+    // Exit process
+    process.exit(0);
+  }
+}
+
+// Handle process signals for clean shutdown
+process.on('SIGTERM', performGracefulShutdown);
+process.on('SIGINT', performGracefulShutdown);
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -1494,6 +1674,9 @@ export async function startServer(overridePort?: number) {
   
   // Start background hydration to pick up any unfinished jobs from a restart
   startBackgroundHydration();
+  
+  // Start heartbeat monitoring for graceful shutdown
+  startHeartbeatMonitor();
   
   return {
     app,
