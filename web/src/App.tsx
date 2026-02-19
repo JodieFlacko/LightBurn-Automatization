@@ -294,7 +294,7 @@ export default function App() {
   // ==================== GRACEFUL SHUTDOWN: HEARTBEAT SYSTEM ====================
   // Send periodic heartbeat to server to indicate this client is alive
   useEffect(() => {
-    const heartbeatInterval = setInterval(async () => {
+    const sendHeartbeat = async () => {
       try {
         await fetch(`${API_URL}/api/heartbeat`, {
           method: 'POST',
@@ -305,9 +305,39 @@ export default function App() {
         // Silent fail - if server is down, we can't do anything anyway
         console.warn('Heartbeat failed:', error);
       }
-    }, 5000); // Send heartbeat every 5 seconds
+    };
+    
+    // Send initial heartbeat immediately
+    sendHeartbeat();
+    
+    // Then send periodic heartbeats
+    const heartbeatInterval = setInterval(sendHeartbeat, 5000);
     
     return () => clearInterval(heartbeatInterval);
+  }, [clientId]);
+  
+  // ==================== GRACEFUL SHUTDOWN: PAGE VISIBILITY RECONNECT ====================
+  // When tab becomes visible after being minimized, immediately send heartbeat
+  // This prevents disconnection due to browser throttling background tabs
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        // Tab became visible, send immediate heartbeat to reestablish connection
+        try {
+          await fetch(`${API_URL}/api/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId })
+          });
+          console.log('Tab visibility restored, heartbeat sent');
+        } catch (error) {
+          console.warn('Visibility heartbeat failed:', error);
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [clientId]);
   
   // ==================== GRACEFUL SHUTDOWN: EXPLICIT DISCONNECT ====================
@@ -771,6 +801,15 @@ export default function App() {
       ]
     : orders;
 
+  // "Ordini Stampati": show only completed orders (both sides printed or retro not required)
+  const isOrderCompleted = (order: Order) =>
+    order.fronteStatus === 'printed' &&
+    (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
+  const allOrdersDisplayed =
+    filterMode === 'all'
+      ? displayedOrders.filter(isOrderCompleted)
+      : displayedOrders;
+
   // Split orders into rework and new categories (only for "To Do" view)
   const isReworkOrder = (order: Order) => {
     // Only move to "Rework" section orders that were FULLY printed before
@@ -951,7 +990,7 @@ export default function App() {
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                onClick={() => setFilterMode('pending')}
+                onClick={() => { if (filterMode !== 'pending') { setOrders([]); setLoading(true); setFilterMode('pending'); } }}
               >
                 Da Stampare
               </button>
@@ -961,9 +1000,9 @@ export default function App() {
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                onClick={() => setFilterMode('all')}
+                onClick={() => { if (filterMode !== 'all') { setOrders([]); setLoading(true); setFilterMode('all'); } }}
               >
-                Tutti gli Ordini (Completati e Da Stampare)
+                Ordini Stampati
               </button>
             </div>
             <div className="flex items-center gap-3">
@@ -983,7 +1022,7 @@ export default function App() {
           </div>
 
           {/* For "To Do" mode with split categories */}
-          {filterMode === 'pending' && (reworkOrders.length > 0 || newOrders.length > 0) ? (
+          {filterMode === 'pending' && !loading && (reworkOrders.length > 0 || newOrders.length > 0) ? (
             <div className="divide-y divide-slate-200">
               {/* New Orders Section - Now First */}
               {newOrders.length > 0 && (
@@ -1039,19 +1078,22 @@ export default function App() {
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
                     renderEmptyState("Loading...")
-                  ) : displayedOrders.length === 0 ? (
+                  ) : allOrdersDisplayed.length === 0 ? (
                     renderEmptyState(
                       activeSearchTerm
                         ? `Non ci sono ordini con ID: ${activeSearchTerm}.`
+                        : filterMode === 'all'
+                        ? "Non ci sono ordini completati."
                         : "Non ci sono ordini."
                     )
                   ) : (
-                    displayedOrders.map(order => (
+                    allOrdersDisplayed.map(order => (
                       <OrderRow
                         key={order.id}
                         order={order}
                         showDiscardColumn={false}
                         activeSearchTerm={activeSearchTerm}
+                        isCompletedOnlyView={filterMode === 'all'}
                         processingFronteOrders={processingFronteOrders}
                         processingRetroOrders={processingRetroOrders}
                         onProcessSide={handleSideProcessing}

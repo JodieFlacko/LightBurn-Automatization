@@ -29,8 +29,8 @@ type ClientConnection = {
 };
 
 const activeClients = new Map<string, ClientConnection>();
-const HEARTBEAT_TIMEOUT = 15000; // 15 seconds without heartbeat = client considered dead
-const HEARTBEAT_CHECK_INTERVAL = 5000; // Check for stale clients every 5 seconds
+const HEARTBEAT_TIMEOUT = 600000; // 10 minutes (600 seconds) - tolerates browser throttling when tab is minimized
+const HEARTBEAT_CHECK_INTERVAL = 30000; // Check for stale clients every 30 seconds
 const SHUTDOWN_GRACE_PERIOD = 5000; // 5 seconds grace period to avoid "Refresh Trap"
 
 let heartbeatMonitor: NodeJS.Timeout | null = null;

@@ -13,6 +13,8 @@ type OrderRowProps = {
   order: Order;
   showDiscardColumn?: boolean;
   activeSearchTerm?: string;
+  /** When true (e.g. "Tutti gli Ordini" section), row uses orange background */
+  isCompletedOnlyView?: boolean;
   processingFronteOrders: Set<string>;
   processingRetroOrders: Set<string>;
   onProcessSide: (orderId: string, side: 'front' | 'retro') => void;
@@ -25,6 +27,7 @@ export default function OrderRow({
   order,
   showDiscardColumn = false,
   activeSearchTerm = '',
+  isCompletedOnlyView = false,
   processingFronteOrders,
   processingRetroOrders,
   onProcessSide,
@@ -57,10 +60,12 @@ export default function OrderRow({
   // Legacy check for backward compatibility
   const hasCustomField = hasFrontCustomData;
   
-  // Row background: amber for exact match, dim for both sides printed, white for pending
+  // Row background: orange in "Tutti gli Ordini", amber for exact match, dim for both sides printed, white for pending
   const bothSidesPrinted = order.fronteStatus === 'printed' && 
     (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
-  const rowClassName = isExactMatch 
+  const rowClassName = isCompletedOnlyView
+    ? "bg-amber-200 transition-colors duration-200"
+    : isExactMatch 
     ? "bg-amber-50 transition-colors duration-200" 
     : bothSidesPrinted
     ? "bg-slate-50 opacity-50 transition-opacity duration-200"
@@ -134,11 +139,11 @@ export default function OrderRow({
     } else if (frontePrinted || (order.retroStatus === 'printed')) {
       // Partial completion
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-300 px-2.5 py-1 text-xs font-medium text-slate-700">
           <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-11a1 1 0 112 0v3.586l1.707 1.707a1 1 0 01-1.414 1.414l-2-2A1 1 0 019 11V7z" clipRule="evenodd" />
           </svg>
-          Partial
+          Parziale
         </span>
       );
     }
@@ -214,11 +219,11 @@ export default function OrderRow({
       );
     }
 
-    // Printed state - show Resend button with warning color
+    // Printed state - show Resend button (green)
     if (sideStatus === 'printed') {
       return (
         <button
-          className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+          className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
           onClick={() => onProcessSide(order.orderId, side)}
           title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
         >
@@ -248,7 +253,7 @@ export default function OrderRow({
       <td className="px-4 py-3 font-medium text-slate-700 w-32 text-left align-middle">
         {order.orderId}
       </td>
-      <td className="px-4 py-3 text-slate-600 w-32 text-left align-middle">
+      <td className="px-4 py-3 text-slate-950 w-32 text-left align-middle">
         {order.sku ?? "-"}
       </td>
       <td className="px-4 py-3 text-slate-600 w-48 text-left align-middle">
