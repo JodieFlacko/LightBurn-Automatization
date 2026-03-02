@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
-import { notInArray, eq, sql, and, isNotNull } from "drizzle-orm";
+import { notInArray, eq, sql, and, isNotNull, or, isNull } from "drizzle-orm";
 import pLimit from "p-limit";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
@@ -173,7 +173,7 @@ export async function syncOrders(): Promise<SyncResult> {
   let deleted = 0;
   let skipped = 0;
   const totalParsed = normalizedRecords.length;
-  const incomingOrderIds = new Set<string>();
+  const incomingOrderItemIds = new Set<string>();
 
   for (const normalized of normalizedRecords) {
     if (!normalized.orderId) {
@@ -181,22 +181,32 @@ export async function syncOrders(): Promise<SyncResult> {
       continue;
     }
 
+    if (!normalized.orderItemId) {
+      skipped += 1;
+      logger.debug(
+        { orderId: normalized.orderId },
+        "Skipping order without order-item-id"
+      );
+      continue;
+    }
+
     // Skip orders without zipUrl (customized-url) - we only want customized orders
     if (!normalized.zipUrl) {
       skipped += 1;
       logger.debug(
-        { orderId: normalized.orderId },
+        { orderId: normalized.orderId, orderItemId: normalized.orderItemId },
         "Skipping order without customized-url (zipUrl)"
       );
       continue;
     }
 
-    incomingOrderIds.add(normalized.orderId);
+    incomingOrderItemIds.add(normalized.orderItemId);
 
     const result = db
       .insert(orders)
       .values({
         orderId: normalized.orderId,
+        orderItemId: normalized.orderItemId,
         purchaseDate: normalized.purchaseDate ?? null,
         status: "pending",
         customField: normalized.customField ?? null,
@@ -215,11 +225,11 @@ export async function syncOrders(): Promise<SyncResult> {
     }
   }
 
-  if (incomingOrderIds.size > 0) {
-    const ids = Array.from(incomingOrderIds);
+  if (incomingOrderItemIds.size > 0) {
+    const ids = Array.from(incomingOrderItemIds);
     const deleteResult = db
       .delete(orders)
-      .where(notInArray(orders.orderId, ids))
+      .where(or(notInArray(orders.orderItemId, ids), isNull(orders.orderItemId)))
       .run();
 
     deleted = deleteResult.changes;
@@ -244,8 +254,8 @@ export async function syncOrders(): Promise<SyncResult> {
   }
 
   // Update retroStatus for orders based on retro template availability
-  if (incomingOrderIds.size > 0) {
-    logger.info({ orderCount: incomingOrderIds.size }, "Checking retro template availability for synced orders");
+  if (incomingOrderItemIds.size > 0) {
+    logger.info({ orderCount: incomingOrderItemIds.size }, "Checking retro template availability for synced orders");
     
     // Get all orders that have retroStatus='not_required'
     const allOrders = await db
@@ -256,7 +266,7 @@ export async function syncOrders(): Promise<SyncResult> {
     
     // Filter to only check orders from this sync
     const ordersToCheck = allOrders.filter(order => 
-      incomingOrderIds.has(order.orderId)
+      order.orderItemId != null && incomingOrderItemIds.has(order.orderItemId)
     );
     
     // Group orders by SKU to avoid checking the same SKU multiple times

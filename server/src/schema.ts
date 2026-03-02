@@ -3,7 +3,8 @@ import { sql } from "drizzle-orm";
 
 export const orders = sqliteTable("orders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  orderId: text("order_id").notNull().unique(),
+  orderId: text("order_id").notNull(),
+  orderItemId: text("order_item_id").unique(),
   purchaseDate: text("purchase_date"),
   status: text("status", { enum: ["pending", "processing", "printed", "error"] }).notNull().default("pending"),
   customField: text("custom_field"),

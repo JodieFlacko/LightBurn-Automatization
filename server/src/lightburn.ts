@@ -867,8 +867,20 @@ export async function generateLightBurnProject(
         windowsPath 
       }, 'Path normalized for LightBurn launch');
       
-      // Launch LightBurn
-      await execFileAsync('cmd.exe', ['/c', 'start', '', windowsPath]);
+      // Launch LightBurn and bring it to the foreground.
+      // AppActivate restores minimized windows and sets focus; it runs after a short
+      // delay so LightBurn has time to receive and register the new file.
+      const escapedPath = windowsPath.replace(/'/g, "''"); // escape single-quotes for PS
+      const psCommand =
+        `Invoke-Item '${escapedPath}'; ` +
+        `Start-Sleep -Milliseconds 1000; ` +
+        `(New-Object -ComObject WScript.Shell).AppActivate('LightBurn')`;
+      await execFileAsync('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle', 'Hidden',
+        '-Command', psCommand,
+      ]);
 
       logger.info(
         { orderId: order.orderId, windowsPath },

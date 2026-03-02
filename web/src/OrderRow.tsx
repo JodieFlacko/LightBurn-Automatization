@@ -117,7 +117,7 @@ export default function OrderRow({
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
           <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
-          Processing
+          In Elaborazione
         </span>
       );
     }
@@ -152,7 +152,7 @@ export default function OrderRow({
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
         <span className="h-2 w-2 rounded-full bg-slate-400"></span>
-        Pending
+        In Attesa
       </span>
     );
   };
@@ -187,7 +187,7 @@ export default function OrderRow({
           disabled
           title={`${side === 'front' ? 'Front' : 'Retro'} side is being processed`}
         >
-          Processing...
+          Elaborazione...
         </button>
       );
     }
@@ -253,6 +253,9 @@ export default function OrderRow({
       <td className="px-4 py-3 font-medium text-slate-700 w-32 text-left align-middle">
         {order.orderId}
       </td>
+      <td className="px-4 py-3 font-medium text-slate-700 w-40 text-left align-middle">
+        {order.orderItemId ?? "-"}
+      </td>
       <td className="px-4 py-3 text-slate-950 w-32 text-left align-middle">
         {order.sku ?? "-"}
       </td>
@@ -268,7 +271,7 @@ export default function OrderRow({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
-              View Customization
+              Visualizza Dettagli
             </button>
             {!order.designName && order.frontText && (
               <span className="text-xs text-slate-600 truncate" title={order.frontText}>

@@ -5,6 +5,7 @@
 export type Order = {
   id: number;
   orderId: string;
+  orderItemId: string | null;
   purchaseDate: string | null;
   sku: string | null;
   buyerName: string | null;

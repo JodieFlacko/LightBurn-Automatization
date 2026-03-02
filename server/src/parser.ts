@@ -22,6 +22,7 @@ const normalizeHeader = (key: string) =>
 */
 export const HEADER_ALIASES = {
   orderId: ["orderid", "amazonorderid", "id"],
+  orderItemId: ["orderitemid"],
   purchaseDate: ["purchasedate", "orderdate", "date"],
   status: ["status", "orderstatus"],
   customField: ["custom", "customfield", "customfieldvalue"],
@@ -36,6 +37,7 @@ export const HEADER_ALIASES = {
 
 const normalizedRecordSchema = z.object({
   orderId: z.string().optional(),
+  orderItemId: z.string().optional(),
   purchaseDate: z.string().optional(),
   status: z.string().optional(),
   customField: z.string().optional(),
@@ -101,6 +103,7 @@ export function normalizeRecord(
   };
 
   const orderId = overrides.orderId ?? getByAliases(HEADER_ALIASES.orderId);
+  const orderItemId = overrides.orderItemId ?? getByAliases(HEADER_ALIASES.orderItemId);
   const purchaseDate =
     overrides.purchaseDate ?? getByAliases(HEADER_ALIASES.purchaseDate);
   const status = overrides.status ?? getByAliases(HEADER_ALIASES.status);
@@ -114,6 +117,7 @@ export function normalizeRecord(
 
   return normalizedRecordSchema.parse({
     orderId,
+    orderItemId,
     purchaseDate,
     status,
     customField,

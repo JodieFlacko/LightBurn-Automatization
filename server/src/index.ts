@@ -580,7 +580,7 @@ app.post("/sync", async (request, reply) => {
 
 app.get("/orders", async (request) => {
   const querySchema = z.object({
-    limit: z.coerce.number().int().min(1).max(100).default(50),
+    limit: z.coerce.number().int().min(1).max(10000).default(10000),
     offset: z.coerce.number().int().min(0).default(0),
     search: z.string().optional(),
     hasCustomField: z.coerce.boolean().optional(),
@@ -779,7 +779,7 @@ const handleSideProcessing = async (
   if (currentStatus === 'printed') {
     logger.warn(
       { orderId, side: sideLabel, status: currentStatus, processedAt: order[processedField] },
-      `${sideLabel} side was already printed, allowing retry`
+      `${sideLabel} è già stato stampato, permettendo il ripristino`
     );
   }
 
@@ -910,7 +910,7 @@ const handleSideProcessing = async (
       orderId: result.orderId,
       filePath: result.filePath,
       message: `LightBurn project generated and launched successfully for ${sideLabel} side`,
-      warning: currentStatus === 'printed' ? `This ${sideLabel} side was already marked as printed. Reprocessed successfully.` : undefined
+      warning: currentStatus === 'printed' ? `Questo ${sideLabel} è già stato stampato. Ristampato con successo.` : undefined
     };
     
   } catch (error) {
@@ -970,7 +970,7 @@ const handleSideProcessing = async (
         updatedAt: sql`CURRENT_TIMESTAMP`
       };
       
-      logger.warn({ orderId, side: sideLabel, sku: order.sku }, "Configuration error - requires manual intervention");
+      logger.warn({ orderId, side: sideLabel, sku: order.sku }, "Errore Configurazione - richiede intervento manuale");
     } else {
       // Transient error - use retry logic
       const newAttemptCount = (currentAttemptCount || 0) + 1;
