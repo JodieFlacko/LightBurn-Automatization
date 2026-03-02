@@ -837,9 +837,10 @@ export default function App() {
   // 'processing' is also accepted so that reprinting an already-completed order doesn't
   // cause it to flicker out of the list while the request is in flight.
   const isOrderCompleted = (order: Order) => {
-    const frontOk = order.fronteStatus === 'printed' || order.fronteStatus === 'processing';
-    const retroOk = order.retroStatus === 'printed' || order.retroStatus === 'not_required' || order.retroStatus === 'processing';
-    return frontOk && retroOk;
+    const frontDone = order.fronteStatus === 'printed' && order.frontePrintCount >= order.quantity;
+    const retroDone = order.retroStatus === 'not_required' ||
+      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity);
+    return frontDone && retroDone;
   };
   const allOrdersDisplayed =
     filterMode === 'all'
@@ -848,21 +849,17 @@ export default function App() {
 
   // Split orders into rework and new categories (only for "To Do" view)
   const isReworkOrder = (order: Order) => {
-    // Only move to "Rework" section orders that were FULLY printed before
-    // (both sides completed) but are back in the queue for reprinting.
-    // This includes reprints with config errors OR reprints needing to be done again.
-    
-    // Check if both sides were fully printed at some point
-    const wasFronteFullyPrinted = Boolean(order.fronteProcessedAt);
-    const wasRetroFullyPrinted = Boolean(order.retroProcessedAt) || order.retroStatus === 'not_required';
-    
-    // If both sides were printed, this is a reprint scenario → Rework section
-    if (wasFronteFullyPrinted && wasRetroFullyPrinted) {
-      return true;
-    }
+    // An order enters the Rework section only when ALL required copies of BOTH
+    // sides have been successfully printed (print count reached quantity) and
+    // the order is back in the queue (e.g. error or manual reprint).
+    // Multi-copy orders that are still mid-print stay in "New Orders".
+    const wasFronteFullyPrinted =
+      order.fronteStatus === 'printed' && order.frontePrintCount >= order.quantity;
+    const wasRetroFullyPrinted =
+      order.retroStatus === 'not_required' ||
+      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity);
 
-    // All other orders (including new orders with config errors) → New Orders section
-    return false;
+    return wasFronteFullyPrinted && wasRetroFullyPrinted;
   };
 
   const reworkOrders = filterMode === 'pending' 
@@ -901,8 +898,8 @@ export default function App() {
     } = {}
   ) => {
     const { showDiscardColumn = false, isCompletedOnlyView = false, onDiscardClick } = options;
-    // 8 main columns + optional Scarta column
-    const colSpan = showDiscardColumn ? 9 : 8;
+    // 9 main columns (added Qty) + optional Scarta column
+    const colSpan = showDiscardColumn ? 10 : 9;
     const grouped = groupOrdersByOrderId(orderList);
     const rows: React.ReactNode[] = [];
 
@@ -968,6 +965,7 @@ export default function App() {
         <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">ID Ordine</th>
         <th className="px-4 py-3 whitespace-nowrap w-40 text-left align-middle">ITEM ID</th>
         <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">SKU</th>
+        <th className="px-4 py-3 whitespace-nowrap w-16 text-center align-middle">Qty</th>
         <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Campo Custom</th>
         <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Colore</th>
         <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Status</th>
@@ -983,7 +981,7 @@ export default function App() {
   // Reusable empty state
   const renderEmptyState = (message: string, showDiscardColumn: boolean = false) => (
     <tr>
-      <td className="px-4 py-4 text-center text-slate-500 align-middle" colSpan={showDiscardColumn ? 8 : 7}>
+      <td className="px-4 py-4 text-center text-slate-500 align-middle" colSpan={showDiscardColumn ? 9 : 8}>
         {message}
       </td>
     </tr>

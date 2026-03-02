@@ -11,6 +11,7 @@ export type Order = {
   buyerName: string | null;
   customField: string | null;
   status: 'pending' | 'processing' | 'printed' | 'error';
+  quantity: number;
   detectedColor?: string | null;
   errorMessage?: string | null;
   processedAt?: string | null;
@@ -32,9 +33,11 @@ export type Order = {
   fronteErrorMessage?: string | null;
   fronteAttemptCount?: number;
   fronteProcessedAt?: string | null;
+  frontePrintCount: number;
   // Retro side fields
   retroStatus: 'not_required' | 'pending' | 'processing' | 'printed' | 'error';
   retroErrorMessage?: string | null;
   retroAttemptCount?: number;
   retroProcessedAt?: string | null;
+  retroPrintCount: number;
 };

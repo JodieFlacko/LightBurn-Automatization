@@ -27,6 +27,11 @@ export const orders = sqliteTable("orders", {
   retroAttemptCount: integer("retro_attempt_count").notNull().default(0),
   retroProcessedAt: text("retro_processed_at"),
   
+  // Quantity ordered and per-side print counts
+  quantity: integer("quantity").notNull().default(1),
+  frontePrintCount: integer("fronte_print_count").notNull().default(0),
+  retroPrintCount: integer("retro_print_count").notNull().default(0),
+
   // Amazon Custom data
   zipUrl: text("zip_url"),
   designName: text("design_name"),

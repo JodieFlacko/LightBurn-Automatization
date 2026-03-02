@@ -64,8 +64,8 @@ export default function ReworkSection({
   };
 
   const grouped = groupOrdersByOrderId(orders);
-  // ReworkSection always has the Discard column → OrderRow renders 9 cells
-  const colSpan = 9;
+  // ReworkSection always has the Discard column → OrderRow renders 10 cells (added Qty column)
+  const colSpan = 10;
 
   return (
     <div>
@@ -92,6 +92,7 @@ export default function ReworkSection({
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">Order ID</th>
                 <th className="px-4 py-3 whitespace-nowrap w-40 text-left align-middle">Item ID</th>
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">SKU</th>
+                <th className="px-4 py-3 whitespace-nowrap w-16 text-center align-middle">Qty</th>
                 <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Custom Field</th>
                 <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Color</th>
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Status</th>

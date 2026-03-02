@@ -64,6 +64,13 @@
       "when": 1771100000000,
       "tag": "0008_remove_order_id_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1771200000000,
+      "tag": "0009_add_quantity_print_counts",
+      "breakpoints": true
     }
   ]
 }

@@ -63,14 +63,18 @@ export default function OrderRow({
   // Legacy check for backward compatibility
   const hasCustomField = hasFrontCustomData;
   
-  // Row background: orange in "Tutti gli Ordini", amber for exact match, dim for both sides printed, white for pending
-  const bothSidesPrinted = order.fronteStatus === 'printed' && 
-    (order.retroStatus === 'printed' || order.retroStatus === 'not_required');
+  // A side is fully done when its print count has reached the required quantity
+  const fronteDone = order.fronteStatus === 'printed' && order.frontePrintCount >= order.quantity;
+  const retroDone = order.retroStatus === 'not_required' ||
+    (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity);
+  const bothSidesDone = fronteDone && retroDone;
+
+  // Row background: orange in "Tutti gli Ordini", amber for exact match, dim for both sides done, white for pending
   const rowClassName = isCompletedOnlyView
     ? "bg-amber-200 transition-colors duration-200"
     : isExactMatch 
     ? "bg-amber-50 transition-colors duration-200" 
-    : bothSidesPrinted
+    : bothSidesDone
     ? "bg-slate-50 opacity-50 transition-opacity duration-200"
     : "transition-colors duration-200";
 
@@ -125,12 +129,9 @@ export default function OrderRow({
       );
     }
 
-    // Priority 3: Check for partial completion (at least one side printed, but not both)
-    const frontePrinted = order.fronteStatus === 'printed';
-    const retroPrintedOrNotRequired = order.retroStatus === 'printed' || order.retroStatus === 'not_required';
-    
-    if (frontePrinted && retroPrintedOrNotRequired) {
-      // Both sides complete
+    // Priority 3: Check for partial or full completion
+    if (bothSidesDone) {
+      // All copies of both sides have been printed
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
           <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -139,8 +140,8 @@ export default function OrderRow({
           Completo
         </span>
       );
-    } else if (frontePrinted || (order.retroStatus === 'printed')) {
-      // Partial completion
+    } else if (order.fronteStatus === 'printed' || order.retroStatus === 'printed') {
+      // At least one side has been printed but not all copies are done
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-300 px-2.5 py-1 text-xs font-medium text-slate-700">
           <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -160,13 +161,15 @@ export default function OrderRow({
     );
   };
   
-  // Determine button appearance based on side status
+  // Determine button appearance based on side status and print progress
   const getSideActionButton = (
     side: 'front' | 'retro',
     sideStatus: 'pending' | 'processing' | 'printed' | 'error' | 'not_required',
     sideErrorMessage: string | null | undefined,
-    sideAttemptCount: number | undefined
+    sideAttemptCount: number | undefined,
+    sidePrintCount: number
   ) => {
+    const remaining = order.quantity - sidePrintCount;
     // Check if this side has custom data FIRST (before checking not_required status)
     const hasCustomDataForSide = side === 'front' ? hasFrontCustomData : hasRetroCustomData;
     
@@ -222,13 +225,26 @@ export default function OrderRow({
       );
     }
 
-    // Printed state - show Resend button (green)
+    // Printed state - show remaining copies or completion button
     if (sideStatus === 'printed') {
+      if (remaining > 0) {
+        // Still copies left to print for this side
+        return (
+          <button
+            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+            onClick={() => onProcessSide(order.orderItemId!, side)}
+            title={`${sidePrintCount}/${order.quantity} printed — ${remaining} ${remaining === 1 ? 'copy' : 'copies'} remaining`}
+          >
+            Ristampa ({remaining} rimast{remaining === 1 ? 'a' : 'e'})
+          </button>
+        );
+      }
+      // All copies done - green resend button
       return (
         <button
           className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
           onClick={() => onProcessSide(order.orderItemId!, side)}
-          title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
+          title={`${side === 'front' ? 'Front' : 'Retro'} fully printed (${sidePrintCount}/${order.quantity}) — resend if needed`}
         >
           Ristampa
         </button>
@@ -261,6 +277,15 @@ export default function OrderRow({
       </td>
       <td className="px-4 py-3 text-slate-950 w-32 text-left align-middle">
         {order.sku ?? "-"}
+      </td>
+      <td className="px-4 py-3 w-16 text-center align-middle">
+        {order.quantity > 1 ? (
+          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-400/40">
+            ×{order.quantity}
+          </span>
+        ) : (
+          <span className="text-slate-400 text-xs">1</span>
+        )}
       </td>
       <td className="px-4 py-3 text-slate-600 w-48 text-left align-middle">
         {(order.frontText || order.designName) ? (
@@ -336,12 +361,12 @@ export default function OrderRow({
       </td>
       <td className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">
         <div className="flex items-center justify-center">
-          {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount)}
+          {getSideActionButton('front', order.fronteStatus, order.fronteErrorMessage, order.fronteAttemptCount, order.frontePrintCount)}
         </div>
       </td>
       <td className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">
         <div className="flex items-center justify-center">
-          {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount)}
+          {getSideActionButton('retro', order.retroStatus, order.retroErrorMessage, order.retroAttemptCount, order.retroPrintCount)}
         </div>
       </td>
       {showDiscardColumn && (

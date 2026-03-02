@@ -243,11 +243,15 @@ process.on('SIGINT', performGracefulShutdown);
 // ==================== HELPER FUNCTIONS ====================
 
 /**
- * Calculate overall order status based on front and retro statuses
+ * Calculate overall order status based on front and retro statuses and print counts.
+ * The order is only considered 'printed' when both sides have reached the required quantity.
  */
 function calculateOverallStatus(
   fronteStatus: string,
-  retroStatus: string
+  retroStatus: string,
+  quantity: number = 1,
+  frontePrintCount: number = 0,
+  retroPrintCount: number = 0
 ): 'pending' | 'processing' | 'printed' | 'error' {
   // If either side has an error, overall is error
   if (fronteStatus === 'error' || retroStatus === 'error') {
@@ -259,8 +263,11 @@ function calculateOverallStatus(
     return 'processing';
   }
   
-  // Both sides must be printed (or retro is not_required) for overall to be printed
-  if (fronteStatus === 'printed' && (retroStatus === 'printed' || retroStatus === 'not_required')) {
+  // Both sides must have reached the required quantity
+  const fronteDone = fronteStatus === 'printed' && frontePrintCount >= quantity;
+  const retroDone = retroStatus === 'not_required' || (retroStatus === 'printed' && retroPrintCount >= quantity);
+
+  if (fronteDone && retroDone) {
     return 'printed';
   }
   
@@ -281,7 +288,10 @@ async function updateOverallStatus(orderId: string): Promise<void> {
   const currentOrder = order[0];
   const newStatus = calculateOverallStatus(
     currentOrder.fronteStatus,
-    currentOrder.retroStatus
+    currentOrder.retroStatus,
+    currentOrder.quantity,
+    currentOrder.frontePrintCount,
+    currentOrder.retroPrintCount
   );
   
   // Only update if status changed
@@ -614,16 +624,20 @@ app.get("/orders", async (request) => {
   }
 
   if (excludeStatus) {
-    // For side-specific filtering, exclude only if BOTH sides are complete
+    // For side-specific filtering, exclude only if BOTH sides are fully done
+    // (i.e. each side's print count has reached the required quantity)
     if (excludeStatus === 'printed') {
-      // Exclude orders where BOTH sides are done:
-      // - fronteStatus is 'printed' AND
-      // - retroStatus is either 'printed' OR 'not_required'
       conditions.push(
-        sql`NOT (${orders.fronteStatus} = 'printed' AND (${orders.retroStatus} = 'printed' OR ${orders.retroStatus} = 'not_required'))`
+        sql`NOT (
+          ${orders.fronteStatus} = 'printed'
+          AND ${orders.frontePrintCount} >= ${orders.quantity}
+          AND (
+            ${orders.retroStatus} = 'not_required'
+            OR (${orders.retroStatus} = 'printed' AND ${orders.retroPrintCount} >= ${orders.quantity})
+          )
+        )`
       );
     } else {
-      // For other statuses, fall back to old behavior
       conditions.push(ne(orders.status, excludeStatus));
     }
   }
@@ -880,11 +894,15 @@ const handleSideProcessing = async (
       `LightBurn project generated successfully for ${sideLabel} side`
     );
     
-    // Update the side status to 'printed' with timestamp
+    // Determine the print count field to increment for this side
+    const printCountField = side === 'front' ? 'frontePrintCount' : 'retroPrintCount';
+
+    // Update the side status to 'printed' with timestamp, and increment the print count
     const successUpdateData = {
       [statusField]: 'printed' as const,
       [processedField]: sql`CURRENT_TIMESTAMP`,
       [errorField]: null,
+      [printCountField]: sql`${side === 'front' ? orders.frontePrintCount : orders.retroPrintCount} + 1`,
       updatedAt: sql`CURRENT_TIMESTAMP`
     };
     

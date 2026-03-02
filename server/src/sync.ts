@@ -215,6 +215,7 @@ export async function syncOrders(): Promise<SyncResult> {
         customField: normalized.customField ?? null,
         sku: normalized.sku ?? null,
         buyerName: normalized.buyerName ?? null,
+        quantity: normalized.quantity ? (parseInt(normalized.quantity, 10) || 1) : 1,
         zipUrl: normalized.zipUrl ?? null,
         raw: normalized.raw
       })

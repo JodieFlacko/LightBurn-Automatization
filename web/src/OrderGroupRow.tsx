@@ -11,11 +11,11 @@ type OrderGroupRowProps = {
 function categorizeOrder(o: Order): "error" | "processing" | "printed" | "pending" {
   if (o.fronteStatus === "error" || o.retroStatus === "error") return "error";
   if (o.fronteStatus === "processing" || o.retroStatus === "processing") return "processing";
-  if (
-    o.fronteStatus === "printed" &&
-    (o.retroStatus === "printed" || o.retroStatus === "not_required")
-  )
-    return "printed";
+  const fronteDone = o.fronteStatus === "printed" && o.frontePrintCount >= o.quantity;
+  const retroDone =
+    o.retroStatus === "not_required" ||
+    (o.retroStatus === "printed" && o.retroPrintCount >= o.quantity);
+  if (fronteDone && retroDone) return "printed";
   return "pending";
 }
 
