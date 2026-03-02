@@ -57,6 +57,13 @@
       "when": 1771000000000,
       "tag": "0007_add_order_item_id",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1771100000000,
+      "tag": "0008_remove_order_id_unique",
+      "breakpoints": true
     }
   ]
 }

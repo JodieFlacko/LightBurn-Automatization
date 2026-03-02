@@ -484,14 +484,37 @@ export function setFeedUrl(url: string): void {
 }
 
 /**
+ * Converts a Windows-format path to a WSL-compatible path when running in WSL.
+ * Example: "C:\Users\peppe\Documents" → "/mnt/c/Users/peppe/Documents"
+ *
+ * This is the reverse of the Windows migration and is needed when a path was
+ * stored by a native Windows run but is now being read in a WSL environment.
+ */
+function normalizePathForPlatform(storedPath: string): string {
+  if (!IS_WSL) return storedPath;
+
+  const windowsDrivePattern = /^([a-zA-Z]):[\\\/]/;
+  const match = storedPath.match(windowsDrivePattern);
+  if (match) {
+    const driveLetter = match[1].toLowerCase();
+    return storedPath
+      .replace(windowsDrivePattern, `/mnt/${driveLetter}/`)
+      .replace(/\\/g, '/');
+  }
+
+  return storedPath;
+}
+
+/**
  * Gets the templates directory path.
  * Returns custom path if set, otherwise returns default path.
+ * Always returns a path valid for the current platform (WSL or Windows).
  * @returns The templates directory path
  */
 export function getTemplatesPath(): string {
   const customPath = store.get('templatesPath');
   if (customPath !== null) {
-    return customPath;
+    return normalizePathForPlatform(customPath);
   }
   // Return default path
   return path.join(documentsPath, 'templates');

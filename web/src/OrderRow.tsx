@@ -15,9 +15,11 @@ type OrderRowProps = {
   activeSearchTerm?: string;
   /** When true (e.g. "Tutti gli Ordini" section), row uses orange background */
   isCompletedOnlyView?: boolean;
+  /** When true, row is visually indented as a child of a group header */
+  isInGroup?: boolean;
   processingFronteOrders: Set<string>;
   processingRetroOrders: Set<string>;
-  onProcessSide: (orderId: string, side: 'front' | 'retro') => void;
+  onProcessSide: (orderItemId: string, side: 'front' | 'retro') => void;
   onErrorClick: (order: Order, side: 'front' | 'retro') => void;
   onDiscardClick?: (order: Order) => void;
   assetRules: AssetRule[];
@@ -28,6 +30,7 @@ export default function OrderRow({
   showDiscardColumn = false,
   activeSearchTerm = '',
   isCompletedOnlyView = false,
+  isInGroup = false,
   processingFronteOrders,
   processingRetroOrders,
   onProcessSide,
@@ -177,7 +180,7 @@ export default function OrderRow({
     }
 
     const processingSet = side === 'front' ? processingFronteOrders : processingRetroOrders;
-    const isProcessingSide = processingSet.has(order.orderId);
+    const isProcessingSide = processingSet.has(order.orderItemId ?? '');
 
     // Disable button when processing this side
     if (sideStatus === 'processing' || isProcessingSide) {
@@ -224,7 +227,7 @@ export default function OrderRow({
       return (
         <button
           className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
-          onClick={() => onProcessSide(order.orderId, side)}
+          onClick={() => onProcessSide(order.orderItemId!, side)}
           title={`${side === 'front' ? 'Front' : 'Retro'} already printed - resend if needed`}
         >
           Ristampa
@@ -234,9 +237,9 @@ export default function OrderRow({
 
     // Pending state - show primary button
     return (
-      <button
+        <button
         className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
-        onClick={() => onProcessSide(order.orderId, side)}
+        onClick={() => onProcessSide(order.orderItemId!, side)}
         title={`Process ${side === 'front' ? 'front' : 'retro'} side`}
       >
         Invia a LightBurn
@@ -250,7 +253,7 @@ export default function OrderRow({
         key={order.id}
         className={rowClassName}
       >
-      <td className="px-4 py-3 font-medium text-slate-700 w-32 text-left align-middle">
+      <td className={`${isInGroup ? 'pl-8 pr-4 border-l-2 border-indigo-200' : 'px-4'} py-3 font-medium w-32 text-left align-middle ${isInGroup ? 'text-slate-400 text-xs' : 'text-slate-700'}`}>
         {order.orderId}
       </td>
       <td className="px-4 py-3 font-medium text-slate-700 w-40 text-left align-middle">

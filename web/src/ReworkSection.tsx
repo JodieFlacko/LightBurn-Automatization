@@ -1,5 +1,6 @@
 import { useState } from "react";
 import OrderRow from "./OrderRow";
+import OrderGroupRow from "./OrderGroupRow";
 import type { Order } from "./types";
 
 type AssetRule = {
@@ -20,6 +21,19 @@ type ReworkSectionProps = {
   assetRules: AssetRule[];
 };
 
+function groupOrdersByOrderId(orders: Order[]): Map<string, Order[]> {
+  const map = new Map<string, Order[]>();
+  for (const order of orders) {
+    const group = map.get(order.orderId);
+    if (group) {
+      group.push(order);
+    } else {
+      map.set(order.orderId, [order]);
+    }
+  }
+  return map;
+}
+
 export default function ReworkSection({
   orders,
   activeSearchTerm = '',
@@ -31,10 +45,27 @@ export default function ReworkSection({
   assetRules
 }: ReworkSectionProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   if (orders.length === 0) {
     return null;
   }
+
+  const toggleGroup = (orderId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  };
+
+  const grouped = groupOrdersByOrderId(orders);
+  // ReworkSection always has the Discard column → OrderRow renders 9 cells
+  const colSpan = 9;
 
   return (
     <div>
@@ -59,6 +90,7 @@ export default function ReworkSection({
             <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">Order ID</th>
+                <th className="px-4 py-3 whitespace-nowrap w-40 text-left align-middle">Item ID</th>
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-left align-middle">SKU</th>
                 <th className="px-4 py-3 whitespace-nowrap w-48 text-left align-middle">Custom Field</th>
                 <th className="px-4 py-3 whitespace-nowrap w-20 text-center align-middle">Color</th>
@@ -69,20 +101,54 @@ export default function ReworkSection({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {orders.map(order => (
-                <OrderRow
-                  key={order.id}
-                  order={order}
-                  showDiscardColumn={true}
-                  activeSearchTerm={activeSearchTerm}
-                  processingFronteOrders={processingFronteOrders}
-                  processingRetroOrders={processingRetroOrders}
-                  onProcessSide={onProcessSide}
-                  onErrorClick={onErrorClick}
-                  onDiscardClick={onDiscardClick}
-                  assetRules={assetRules}
-                />
-              ))}
+              {Array.from(grouped).map(([orderId, items]) => {
+                if (items.length === 1) {
+                  return (
+                    <OrderRow
+                      key={items[0].id}
+                      order={items[0]}
+                      showDiscardColumn={true}
+                      activeSearchTerm={activeSearchTerm}
+                      processingFronteOrders={processingFronteOrders}
+                      processingRetroOrders={processingRetroOrders}
+                      onProcessSide={onProcessSide}
+                      onErrorClick={onErrorClick}
+                      onDiscardClick={onDiscardClick}
+                      assetRules={assetRules}
+                    />
+                  );
+                }
+
+                const isExpanded = expandedGroups.has(orderId);
+                return (
+                  <>
+                    <OrderGroupRow
+                      key={`group-${orderId}`}
+                      orderId={orderId}
+                      items={items}
+                      isExpanded={isExpanded}
+                      onToggle={() => toggleGroup(orderId)}
+                      colSpan={colSpan}
+                    />
+                    {isExpanded &&
+                      items.map((order) => (
+                        <OrderRow
+                          key={order.id}
+                          order={order}
+                          showDiscardColumn={true}
+                          isInGroup={true}
+                          activeSearchTerm={activeSearchTerm}
+                          processingFronteOrders={processingFronteOrders}
+                          processingRetroOrders={processingRetroOrders}
+                          onProcessSide={onProcessSide}
+                          onErrorClick={onErrorClick}
+                          onDiscardClick={onDiscardClick}
+                          assetRules={assetRules}
+                        />
+                      ))}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -190,6 +190,11 @@ export async function syncOrders(): Promise<SyncResult> {
       continue;
     }
 
+    // Track all valid order-item-ids from the feed (regardless of zipUrl) so the
+    // subsequent DELETE only removes orders that are genuinely absent from the feed,
+    // not orders that are present but happen to lack a customization at this moment.
+    incomingOrderItemIds.add(normalized.orderItemId);
+
     // Skip orders without zipUrl (customized-url) - we only want customized orders
     if (!normalized.zipUrl) {
       skipped += 1;
@@ -199,8 +204,6 @@ export async function syncOrders(): Promise<SyncResult> {
       );
       continue;
     }
-
-    incomingOrderItemIds.add(normalized.orderItemId);
 
     const result = db
       .insert(orders)
@@ -408,7 +411,8 @@ async function hydrateCustomData(): Promise<void> {
           // Download and parse the Amazon Custom ZIP
           const customData = await processCustomZip(order.zipUrl!);
 
-          // Update the order with the extracted custom data
+          // Update the order with the extracted custom data.
+          // Use primary key (id) not orderId — multi-item orders share the same orderId.
           await db
             .update(orders)
             .set({
@@ -421,10 +425,10 @@ async function hydrateCustomData(): Promise<void> {
               backText3: customData.backText3,
               backText4: customData.backText4,
               customDataSynced: 1,
-              customDataError: null, // Clear any previous error
+              customDataError: null,
               updatedAt: sql`CURRENT_TIMESTAMP`
             })
-            .where(eq(orders.orderId, order.orderId))
+            .where(eq(orders.id, order.id))
             .run();
 
           successCount++;
@@ -441,7 +445,8 @@ async function hydrateCustomData(): Promise<void> {
             `Failed to hydrate Amazon Custom data for order ${order.orderId}`
           );
 
-          // Mark the order with the error but don't stop processing others
+          // Mark the order with the error but don't stop processing others.
+          // Use primary key (id) not orderId — multi-item orders share the same orderId.
           try {
             await db
               .update(orders)
@@ -449,7 +454,7 @@ async function hydrateCustomData(): Promise<void> {
                 customDataError: errorMessage,
                 updatedAt: sql`CURRENT_TIMESTAMP`
               })
-              .where(eq(orders.orderId, order.orderId))
+              .where(eq(orders.id, order.id))
               .run();
           } catch (updateError) {
             logger.error(

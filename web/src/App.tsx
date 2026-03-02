@@ -1,9 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useDebouncedValue } from "./useDebouncedValue";
 import Settings from "./Settings";
 import OrderRow from "./OrderRow";
+import OrderGroupRow from "./OrderGroupRow";
 import ReworkSection from "./ReworkSection";
 import type { Order } from "./types";
+
+function groupOrdersByOrderId(orders: Order[]): Map<string, Order[]> {
+  const map = new Map<string, Order[]>();
+  for (const order of orders) {
+    const group = map.get(order.orderId);
+    if (group) {
+      group.push(order);
+    } else {
+      map.set(order.orderId, [order]);
+    }
+  }
+  return map;
+}
 
 type View = "orders" | "settings";
 
@@ -288,6 +302,7 @@ export default function App() {
   const [isConfigListOpen, setIsConfigListOpen] = useState(false);
   const [discardConfirmOrder, setDiscardConfirmOrder] = useState<Order | null>(null);
   const [assetRules, setAssetRules] = useState<AssetRule[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
 
@@ -443,29 +458,29 @@ export default function App() {
     }
   };
 
-  const handleSideProcessing = async (orderId: string, side: 'front' | 'retro') => {
+  const handleSideProcessing = async (orderItemId: string, side: 'front' | 'retro') => {
     const sideLabel = side === 'front' ? 'fronte' : 'retro';
     const statusField = side === 'front' ? 'fronteStatus' : 'retroStatus';
     const errorField = side === 'front' ? 'fronteErrorMessage' : 'retroErrorMessage';
     const attemptField = side === 'front' ? 'fronteAttemptCount' : 'retroAttemptCount';
     const setProcessingSide = side === 'front' ? setProcessingFronteOrders : setProcessingRetroOrders;
     
-    console.log(`handle${side}Processing called for order:`, orderId);
+    console.log(`handle${side}Processing called for orderItemId:`, orderItemId);
     
-    // Mark order side as processing in local state for UI feedback
-    setProcessingSide(prev => new Set(prev).add(orderId));
+    // Mark this specific item as processing in local state for UI feedback
+    setProcessingSide(prev => new Set(prev).add(orderItemId));
     
-    // Optimistically update status to 'processing'
+    // Optimistically update status to 'processing' for this item only
     setOrders(prevOrders => 
       prevOrders.map(order => 
-        order.orderId === orderId 
+        order.orderItemId === orderItemId 
           ? { ...order, [statusField]: 'processing' as const }
           : order
       )
     );
     
     try {
-      const response = await fetch(`${API_URL}/orders/${orderId}/lightburn/${side}`, {
+      const response = await fetch(`${API_URL}/orders/item/${orderItemId}/lightburn/${side}`, {
         method: "POST"
       });
       const data = await response.json();
@@ -476,7 +491,7 @@ export default function App() {
         // Update to 'printed' status on success
         setOrders(prevOrders => 
           prevOrders.map(order => 
-            order.orderId === orderId 
+            order.orderItemId === orderItemId 
               ? { ...order, [statusField]: 'printed' as const, [errorField]: null }
               : order
           )
@@ -498,7 +513,7 @@ export default function App() {
         // Update to 'error' status on failure
         setOrders(prevOrders => 
           prevOrders.map(order => 
-            order.orderId === orderId 
+            order.orderItemId === orderItemId 
               ? { 
                   ...order, 
                   [statusField]: data.status || 'error' as const,
@@ -521,7 +536,7 @@ export default function App() {
       // Update to 'error' status on network failure
       setOrders(prevOrders => 
         prevOrders.map(order => 
-          order.orderId === orderId 
+          order.orderItemId === orderItemId 
             ? { ...order, [statusField]: 'error' as const, [errorField]: 'Network error: Failed to send to LightBurn' }
             : order
         )
@@ -536,7 +551,7 @@ export default function App() {
       // Remove processing state
       setProcessingSide(prev => {
         const next = new Set(prev);
-        next.delete(orderId);
+        next.delete(orderItemId);
         return next;
       });
       
@@ -790,6 +805,23 @@ export default function App() {
     fetchAssetRules();
   }, []);
 
+  // Auto-expand all multi-item groups when the user is searching
+  useEffect(() => {
+    const term = debouncedSearchTerm.trim();
+    if (!term) return;
+    const toExpand: string[] = [];
+    for (const [orderId, items] of groupOrdersByOrderId(orders)) {
+      if (items.length > 1) toExpand.push(orderId);
+    }
+    if (toExpand.length > 0) {
+      setExpandedGroups((prev) => {
+        const next = new Set(prev);
+        toExpand.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }, [debouncedSearchTerm, orders]);
+
   const activeSearchTerm = debouncedSearchTerm.trim();
   const exactMatchOrder = activeSearchTerm
     ? orders.find((order) => order.orderId === activeSearchTerm)
@@ -844,6 +876,89 @@ export default function App() {
   const handleErrorClick = (order: Order, side: 'front' | 'retro') => {
     setErrorModalOrder(order);
     setErrorModalSide(side);
+  };
+
+  const toggleGroup = (orderId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  };
+
+  // Renders a list of orders, grouping multi-item orders under a collapsible header.
+  // Single-item orders are rendered as plain OrderRow elements (no change).
+  const renderGroupedRows = (
+    orderList: Order[],
+    options: {
+      showDiscardColumn?: boolean;
+      isCompletedOnlyView?: boolean;
+      onDiscardClick?: (order: Order) => void;
+    } = {}
+  ) => {
+    const { showDiscardColumn = false, isCompletedOnlyView = false, onDiscardClick } = options;
+    // 8 main columns + optional Scarta column
+    const colSpan = showDiscardColumn ? 9 : 8;
+    const grouped = groupOrdersByOrderId(orderList);
+    const rows: React.ReactNode[] = [];
+
+    for (const [orderId, items] of grouped) {
+      if (items.length === 1) {
+        rows.push(
+          <OrderRow
+            key={items[0].id}
+            order={items[0]}
+            showDiscardColumn={showDiscardColumn}
+            activeSearchTerm={activeSearchTerm}
+            isCompletedOnlyView={isCompletedOnlyView}
+            processingFronteOrders={processingFronteOrders}
+            processingRetroOrders={processingRetroOrders}
+            onProcessSide={handleSideProcessing}
+            onErrorClick={handleErrorClick}
+            onDiscardClick={onDiscardClick}
+            assetRules={assetRules}
+          />
+        );
+      } else {
+        const isExpanded = expandedGroups.has(orderId);
+        rows.push(
+          <OrderGroupRow
+            key={`group-${orderId}`}
+            orderId={orderId}
+            items={items}
+            isExpanded={isExpanded}
+            onToggle={() => toggleGroup(orderId)}
+            colSpan={colSpan}
+          />
+        );
+        if (isExpanded) {
+          items.forEach((order) => {
+            rows.push(
+              <OrderRow
+                key={order.id}
+                order={order}
+                showDiscardColumn={showDiscardColumn}
+                isInGroup={true}
+                activeSearchTerm={activeSearchTerm}
+                isCompletedOnlyView={isCompletedOnlyView}
+                processingFronteOrders={processingFronteOrders}
+                processingRetroOrders={processingRetroOrders}
+                onProcessSide={handleSideProcessing}
+                onErrorClick={handleErrorClick}
+                onDiscardClick={onDiscardClick}
+                assetRules={assetRules}
+              />
+            );
+          });
+        }
+      }
+    }
+
+    return rows;
   };
 
   // Reusable table header with optional discard column
@@ -1034,19 +1149,7 @@ export default function App() {
                     <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                       {renderTableHeader()}
                       <tbody className="divide-y divide-slate-100">
-                        {newOrders.map(order => (
-                          <OrderRow
-                            key={order.id}
-                            order={order}
-                            showDiscardColumn={false}
-                            activeSearchTerm={activeSearchTerm}
-                            processingFronteOrders={processingFronteOrders}
-                            processingRetroOrders={processingRetroOrders}
-                            onProcessSide={handleSideProcessing}
-                            onErrorClick={handleErrorClick}
-                            assetRules={assetRules}
-                          />
-                        ))}
+                        {renderGroupedRows(newOrders)}
                       </tbody>
                     </table>
                   </div>
@@ -1082,20 +1185,7 @@ export default function App() {
                         : "Non ci sono ordini."
                     )
                   ) : (
-                    allOrdersDisplayed.map(order => (
-                      <OrderRow
-                        key={order.id}
-                        order={order}
-                        showDiscardColumn={false}
-                        activeSearchTerm={activeSearchTerm}
-                        isCompletedOnlyView={filterMode === 'all'}
-                        processingFronteOrders={processingFronteOrders}
-                        processingRetroOrders={processingRetroOrders}
-                        onProcessSide={handleSideProcessing}
-                        onErrorClick={handleErrorClick}
-                        assetRules={assetRules}
-                      />
-                    ))
+                    renderGroupedRows(allOrdersDisplayed, { isCompletedOnlyView: filterMode === 'all' })
                   )}
                 </tbody>
               </table>
@@ -1121,7 +1211,7 @@ export default function App() {
             setErrorModalSide(null);
           }}
           onRetry={() => {
-            handleSideProcessing(errorModalOrder.orderId, errorModalSide);
+            handleSideProcessing(errorModalOrder.orderItemId!, errorModalSide);
             setErrorModalOrder(null);
             setErrorModalSide(null);
           }}

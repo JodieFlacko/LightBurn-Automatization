@@ -666,37 +666,50 @@ const paramsSchema = z.object({
   orderId: z.string().min(1)
 });
 
+const itemParamsSchema = z.object({
+  orderItemId: z.string().min(1)
+});
+
 /**
- * Handle side-specific LightBurn processing (front or retro)
+ * Handle side-specific LightBurn processing (front or retro).
+ * When lookupByItemId is true, resolves the order via orderItemId (unique per item).
+ * When false (default), resolves via orderId (legacy/retry path).
  */
 const handleSideProcessing = async (
   request: { params: unknown },
   reply: any,
-  side: 'front' | 'retro'
+  side: 'front' | 'retro',
+  lookupByItemId = false
 ) => {
-  const { orderId } = paramsSchema.parse(request.params);
+  const lookupValue = lookupByItemId
+    ? itemParamsSchema.parse(request.params).orderItemId
+    : paramsSchema.parse(request.params).orderId;
+
   const sideLabel = side === 'retro' ? 'retro' : 'fronte';
   const endpoint = side === 'retro' ? '/lightburn/retro' : '/lightburn/front';
   
   console.log('=== HANDLE SIDE PROCESSING START ===');
-  console.log('Order ID:', orderId);
+  console.log('Lookup value:', lookupValue);
+  console.log('Lookup by item ID:', lookupByItemId);
   console.log('Side:', side);
   console.log('Side label:', sideLabel);
   console.log('Endpoint:', endpoint);
-  
-  // LOG: Endpoint being called
-  logger.info({ orderId, side: sideLabel, endpoint }, `=== SIDE PROCESSING START: ${endpoint} ===`);
-  logger.info({ orderId, side: sideLabel, endpoint }, `Endpoint called: POST /orders/:orderId${endpoint.replace('/lightburn', '/lightburn')}`);
   
   // Fetch the order from database
   console.log('Fetching order from database...');
   const rows = await db
     .select()
     .from(orders)
-    .where(eq(orders.orderId, orderId))
+    .where(
+      lookupByItemId
+        ? eq(orders.orderItemId, lookupValue)
+        : eq(orders.orderId, lookupValue)
+    )
     .limit(1);
 
   const order = rows[0];
+  // Use the real orderId from the fetched row for all logging and overall-status updates
+  const orderId = order?.orderId ?? lookupValue;
   console.log('Order found:', order);
   
   if (!order) {
@@ -803,7 +816,7 @@ const handleSideProcessing = async (
       
       await db.update(orders)
         .set(updateData)
-        .where(eq(orders.orderId, orderId))
+        .where(eq(orders.id, order.id))
         .run();
       
       logger.info({ orderId, side: sideLabel }, "Migrated old config error to new format");
@@ -830,7 +843,7 @@ const handleSideProcessing = async (
   const updateResult = await db
     .update(orders)
     .set(updateData)
-    .where(eq(orders.orderId, orderId))
+    .where(eq(orders.id, order.id))
     .run();
 
   if (updateResult.changes === 0) {
@@ -878,7 +891,7 @@ const handleSideProcessing = async (
     const finalUpdateResult = await db
       .update(orders)
       .set(successUpdateData)
-      .where(eq(orders.orderId, orderId))
+      .where(eq(orders.id, order.id))
       .run();
 
     if (finalUpdateResult.changes === 0) {
@@ -989,7 +1002,7 @@ const handleSideProcessing = async (
     // Execute the database update
     await db.update(orders)
       .set(errorUpdateData)
-      .where(eq(orders.orderId, orderId))
+      .where(eq(orders.id, order.id))
       .run();
     
     logger.info({ orderId, side: sideLabel, finalStatus: errorUpdateData[statusField], attemptCount: errorUpdateData[attemptField] }, `${sideLabel} state updated in database`);
@@ -1000,7 +1013,7 @@ const handleSideProcessing = async (
     // Verification logging
     const verifyOrder = await db.select()
       .from(orders)
-      .where(eq(orders.orderId, orderId))
+      .where(eq(orders.id, order.id))
       .limit(1);
     
     logger.info({ 
@@ -1288,13 +1301,22 @@ app.post("/orders/:orderId/lightburn", async (request, reply) => {
   return handleLightburn(request, reply);
 });
 
-// New endpoints for side-specific processing
+// Side-specific processing by orderId (legacy — used by retry/error-modal flow)
 app.post("/orders/:orderId/lightburn/front", async (request, reply) => {
   return handleSideProcessing(request, reply, 'front');
 });
 
 app.post("/orders/:orderId/lightburn/retro", async (request, reply) => {
   return handleSideProcessing(request, reply, 'retro');
+});
+
+// Side-specific processing by orderItemId (preferred — unique per item in grouped orders)
+app.post("/orders/item/:orderItemId/lightburn/front", async (request, reply) => {
+  return handleSideProcessing(request, reply, 'front', true);
+});
+
+app.post("/orders/item/:orderItemId/lightburn/retro", async (request, reply) => {
+  return handleSideProcessing(request, reply, 'retro', true);
 });
 
 // Check if retro template is available for an order
