@@ -609,11 +609,13 @@ app.get("/orders", async (request) => {
   }
 
   if (hasCustomField === true) {
-    // Include orders with either old-style custom_field OR Amazon Custom data
+    // Include orders with either old-style custom_field, Amazon Custom data already
+    // hydrated, OR a zipUrl present (hydration pending — orders are still customized).
     conditions.push(
       sql`(
         (${orders.customField} is not null and ${orders.customField} != '') OR
-        (${orders.customDataSynced} = 1)
+        (${orders.customDataSynced} = 1) OR
+        (${orders.zipUrl} is not null and ${orders.zipUrl} != '')
       )`
     );
   }

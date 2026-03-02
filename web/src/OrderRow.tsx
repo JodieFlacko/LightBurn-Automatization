@@ -258,7 +258,7 @@ export default function OrderRow({
         onClick={() => onProcessSide(order.orderItemId!, side)}
         title={`Process ${side === 'front' ? 'front' : 'retro'} side`}
       >
-        Invia a LightBurn
+        Stampa
       </button>
     );
   };

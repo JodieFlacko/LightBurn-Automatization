@@ -12,12 +12,14 @@ type AssetRule = {
 
 type ReworkSectionProps = {
   orders: Order[];
+  title?: string;
+  showDiscardColumn?: boolean;
   activeSearchTerm?: string;
   processingFronteOrders: Set<string>;
   processingRetroOrders: Set<string>;
   onProcessSide: (orderId: string, side: 'front' | 'retro') => void;
   onErrorClick: (order: Order, side: 'front' | 'retro') => void;
-  onDiscardClick: (order: Order) => void;
+  onDiscardClick?: (order: Order) => void;
   assetRules: AssetRule[];
 };
 
@@ -36,6 +38,8 @@ function groupOrdersByOrderId(orders: Order[]): Map<string, Order[]> {
 
 export default function ReworkSection({
   orders,
+  title = 'Configuration Errors',
+  showDiscardColumn = false,
   activeSearchTerm = '',
   processingFronteOrders,
   processingRetroOrders,
@@ -64,8 +68,7 @@ export default function ReworkSection({
   };
 
   const grouped = groupOrdersByOrderId(orders);
-  // ReworkSection always has the Discard column → OrderRow renders 10 cells (added Qty column)
-  const colSpan = 10;
+  const colSpan = showDiscardColumn ? 10 : 9;
 
   return (
     <div>
@@ -81,7 +84,7 @@ export default function ReworkSection({
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
         </svg>
         <h3 className="text-sm font-semibold text-amber-900">
-          Configuration Errors / Reprints ({orders.length})
+          {title} ({orders.length})
         </h3>
       </button>
       {isOpen && (
@@ -98,7 +101,9 @@ export default function ReworkSection({
                 <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Status</th>
                 <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Fronte</th>
                 <th className="px-4 py-3 whitespace-nowrap w-44 text-center align-middle">Action Retro</th>
-                <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Discard</th>
+                {showDiscardColumn && (
+                  <th className="px-4 py-3 whitespace-nowrap w-32 text-center align-middle">Discard</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -108,7 +113,7 @@ export default function ReworkSection({
                     <OrderRow
                       key={items[0].id}
                       order={items[0]}
-                      showDiscardColumn={true}
+                      showDiscardColumn={showDiscardColumn}
                       activeSearchTerm={activeSearchTerm}
                       processingFronteOrders={processingFronteOrders}
                       processingRetroOrders={processingRetroOrders}
@@ -134,18 +139,18 @@ export default function ReworkSection({
                     {isExpanded &&
                       items.map((order) => (
                         <OrderRow
-                          key={order.id}
-                          order={order}
-                          showDiscardColumn={true}
-                          isInGroup={true}
-                          activeSearchTerm={activeSearchTerm}
-                          processingFronteOrders={processingFronteOrders}
-                          processingRetroOrders={processingRetroOrders}
-                          onProcessSide={onProcessSide}
-                          onErrorClick={onErrorClick}
-                          onDiscardClick={onDiscardClick}
-                          assetRules={assetRules}
-                        />
+                        key={order.id}
+                        order={order}
+                        showDiscardColumn={showDiscardColumn}
+                        isInGroup={true}
+                        activeSearchTerm={activeSearchTerm}
+                        processingFronteOrders={processingFronteOrders}
+                        processingRetroOrders={processingRetroOrders}
+                        onProcessSide={onProcessSide}
+                        onErrorClick={onErrorClick}
+                        onDiscardClick={onDiscardClick}
+                        assetRules={assetRules}
+                      />
                       ))}
                   </>
                 );

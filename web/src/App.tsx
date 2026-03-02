@@ -396,11 +396,13 @@ export default function App() {
   // Show banner if there are config errors
   const showConfigBanner = configErrorOrders.length > 0;
 
-  const fetchOrders = async (term: string, mode: 'pending' | 'all') => {
-    console.log('Refetching orders...', { term, mode });
+  const fetchOrders = async (term: string, mode: 'pending' | 'all', silent = false) => {
+    console.log('Refetching orders...', { term, mode, silent });
     const trimmedTerm = term.trim();
-    setLoading(true);
-    setSearching(Boolean(trimmedTerm));
+    if (!silent) {
+      setLoading(true);
+      setSearching(Boolean(trimmedTerm));
+    }
     try {
       const searchParam = trimmedTerm
         ? `&search=${encodeURIComponent(trimmedTerm)}`
@@ -417,8 +419,10 @@ export default function App() {
       console.log('Orders refreshed:', data.items?.length || 0, 'orders');
       setOrders(data.items ?? []);
     } finally {
-      setLoading(false);
-      setSearching(false);
+      if (!silent) {
+        setLoading(false);
+        setSearching(false);
+      }
     }
   };
 
@@ -503,12 +507,6 @@ export default function App() {
           type: 'success'
         });
         setTimeout(() => setToast(null), 4000);
-        
-        // Clear search and refocus input for next scan
-        setSearchTerm("");
-        setTimeout(() => {
-          searchInputRef.current?.focus();
-        }, 100);
       } else {
         // Update to 'error' status on failure
         setOrders(prevOrders => 
@@ -555,9 +553,9 @@ export default function App() {
         return next;
       });
       
-      // ALWAYS refresh orders after request completes to ensure UI shows server state
+      // Silently refresh orders after request completes — avoids DOM collapse and scroll jump
       console.log(`Refreshing orders after ${sideLabel} operation...`);
-      await fetchOrders(searchTerm, filterMode);
+      await fetchOrders(searchTerm, filterMode, true);
     }
   };
 
@@ -600,12 +598,6 @@ export default function App() {
           type: 'success'
         });
         setTimeout(() => setToast(null), 4000);
-        
-        // Clear search and refocus input for next scan
-        setSearchTerm("");
-        setTimeout(() => {
-          searchInputRef.current?.focus();
-        }, 100);
       } else {
         // Update to 'error' status on failure
         setOrders(prevOrders => 
@@ -652,9 +644,9 @@ export default function App() {
         return next;
       });
       
-      // ALWAYS refresh orders after request completes to ensure UI shows server state
+      // Silently refresh orders after request completes — avoids DOM collapse and scroll jump
       console.log('Refreshing orders after LightBurn operation...');
-      await fetchOrders(searchTerm, filterMode);
+      await fetchOrders(searchTerm, filterMode, true);
     }
   };
 
@@ -801,6 +793,18 @@ export default function App() {
     fetchOrders(debouncedSearchTerm, filterMode);
   }, [debouncedSearchTerm, filterMode]);
 
+  const hasPendingHydration = orders.some(
+    (o) => o.zipUrl && o.customDataSynced !== 1
+  );
+
+  useEffect(() => {
+    if (!hasPendingHydration) return;
+    const timer = setInterval(() => {
+      fetchOrders(searchTerm, filterMode, true);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [hasPendingHydration, searchTerm, filterMode]);
+
   useEffect(() => {
     fetchAssetRules();
   }, []);
@@ -833,13 +837,17 @@ export default function App() {
       ]
     : orders;
 
-  // "Ordini Stampati": show only completed orders (both sides printed or retro not required).
-  // 'processing' is also accepted so that reprinting an already-completed order doesn't
-  // cause it to flicker out of the list while the request is in flight.
+  // "Ordini Stampati": show completed orders AND orders being reprinted (processing with
+  // printCount already meeting quantity). This prevents a completed order from flickering
+  // out of "Ordini Stampati" and into "Da Stampare" while a reprint is in flight.
   const isOrderCompleted = (order: Order) => {
-    const frontDone = order.fronteStatus === 'printed' && order.frontePrintCount >= order.quantity;
-    const retroDone = order.retroStatus === 'not_required' ||
-      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity);
+    const frontDone =
+      order.frontePrintCount >= order.quantity &&
+      (order.fronteStatus === 'printed' || order.fronteStatus === 'processing');
+    const retroDone =
+      order.retroStatus === 'not_required' ||
+      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity) ||
+      (order.retroStatus === 'processing' && order.retroPrintCount >= order.quantity);
     return frontDone && retroDone;
   };
   const allOrdersDisplayed =
@@ -847,26 +855,39 @@ export default function App() {
       ? displayedOrders.filter(isOrderCompleted)
       : displayedOrders;
 
-  // Split orders into rework and new categories (only for "To Do" view)
-  const isReworkOrder = (order: Order) => {
-    // An order enters the Rework section only when ALL required copies of BOTH
-    // sides have been successfully printed (print count reached quantity) and
-    // the order is back in the queue (e.g. error or manual reprint).
-    // Multi-copy orders that are still mid-print stay in "New Orders".
-    const wasFronteFullyPrinted =
-      order.fronteStatus === 'printed' && order.frontePrintCount >= order.quantity;
-    const wasRetroFullyPrinted =
-      order.retroStatus === 'not_required' ||
-      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity);
+  // True if either side has a CONFIG_ERROR: prefixed error message.
+  const hasConfigError = (order: Order) =>
+    (order.fronteStatus === 'error' && order.fronteErrorMessage?.startsWith('CONFIG_ERROR:')) ||
+    (order.retroStatus === 'error' && order.retroErrorMessage?.startsWith('CONFIG_ERROR:'));
 
-    return wasFronteFullyPrinted && wasRetroFullyPrinted;
+  // True if the order was previously fully printed (print counts met quantity for both sides).
+  // Uses print counts rather than current status so it correctly detects reprints in flight
+  // (processing) and errors that occurred during a reprint of an already-completed order.
+  const wasFullyPrintedBefore = (order: Order) => {
+    const frontDone = order.frontePrintCount >= order.quantity;
+    const retroDone =
+      order.retroStatus === 'not_required' ||
+      (order.retroStatus === 'printed' && order.retroPrintCount >= order.quantity) ||
+      (order.retroStatus === 'processing' && order.retroPrintCount >= order.quantity) ||
+      (order.retroStatus === 'error' && order.retroPrintCount >= order.quantity);
+    return frontDone && retroDone;
   };
 
-  const reworkOrders = filterMode === 'pending' 
-    ? displayedOrders.filter(isReworkOrder)
+  // Da Stampare collapsible: first-time config errors (never been fully printed)
+  const daStampareConfigErrors = filterMode === 'pending'
+    ? displayedOrders.filter(o => hasConfigError(o) && !wasFullyPrintedBefore(o))
     : [];
-  const newOrders = filterMode === 'pending'
-    ? displayedOrders.filter(order => !isReworkOrder(order))
+
+  // Da Stampare main table: orders that need first-time printing.
+  // Excludes config-error orders (they go to the collapsible) and orders that were
+  // previously fully printed (reprints in flight — those stay in "Ordini Stampati").
+  const daStampareMainOrders = filterMode === 'pending'
+    ? displayedOrders.filter(o => !hasConfigError(o) && !wasFullyPrintedBefore(o))
+    : [];
+
+  // Ordini Stampati collapsible: config errors that occurred on a reprint of a fully-printed order
+  const reprintConfigErrors = filterMode === 'all'
+    ? displayedOrders.filter(o => hasConfigError(o) && wasFullyPrintedBefore(o))
     : [];
 
   // Handler for error clicks from OrderRow
@@ -1129,64 +1150,106 @@ export default function App() {
             </div>
           </div>
 
-          {/* For "To Do" mode with split categories */}
-          {filterMode === 'pending' && !loading && (reworkOrders.length > 0 || newOrders.length > 0) ? (
-            <div className="divide-y divide-slate-200">
-              {/* New Orders Section - Now First */}
-              {newOrders.length > 0 && (
-                <div>
-                  <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center gap-2">
-                    <svg className="h-4 w-4 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
-                    </svg>
-                    <h3 className="text-sm font-semibold text-slate-700">
-                      Nuovi Ordini da Stampare ({newOrders.length})
-                    </h3>
+          {/* Da Stampare: split view with main orders + config errors collapsible */}
+          {filterMode === 'pending' && !loading ? (
+            (daStampareMainOrders.length === 0 && daStampareConfigErrors.length === 0) ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                  {renderTableHeader()}
+                  <tbody className="divide-y divide-slate-100">
+                    {renderEmptyState(
+                      activeSearchTerm
+                        ? `Non ci sono ordini con ID: ${activeSearchTerm}.`
+                        : "Non ci sono ordini."
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200">
+                {/* Main orders section */}
+                {daStampareMainOrders.length > 0 && (
+                  <div>
+                    <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center gap-2">
+                      <svg className="h-4 w-4 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                      </svg>
+                      <h3 className="text-sm font-semibold text-slate-700">
+                        Nuovi Ordini da Stampare ({daStampareMainOrders.length})
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                        {renderTableHeader()}
+                        <tbody className="divide-y divide-slate-100">
+                          {renderGroupedRows(daStampareMainOrders)}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
-                      {renderTableHeader()}
-                      <tbody className="divide-y divide-slate-100">
-                        {renderGroupedRows(newOrders)}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Configuration Errors / Reprints Section - Collapsible */}
-              <ReworkSection
-                orders={reworkOrders}
-                activeSearchTerm={activeSearchTerm}
-                processingFronteOrders={processingFronteOrders}
-                processingRetroOrders={processingRetroOrders}
-                onProcessSide={handleSideProcessing}
-                onErrorClick={handleErrorClick}
-                onDiscardClick={(order) => setDiscardConfirmOrder(order)}
-                assetRules={assetRules}
-              />
-            </div>
-          ) : (
-            /* Single unified table for "All History" or empty/loading states */
+                {/* Configuration Errors collapsible (first-time errors only, no discard) */}
+                <ReworkSection
+                  orders={daStampareConfigErrors}
+                  title="Configuration Errors"
+                  showDiscardColumn={false}
+                  activeSearchTerm={activeSearchTerm}
+                  processingFronteOrders={processingFronteOrders}
+                  processingRetroOrders={processingRetroOrders}
+                  onProcessSide={handleSideProcessing}
+                  onErrorClick={handleErrorClick}
+                  assetRules={assetRules}
+                />
+              </div>
+            )
+          ) : filterMode === 'pending' && loading ? (
+            /* Loading state for Da Stampare */
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                 {renderTableHeader()}
                 <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    renderEmptyState("Loading...")
-                  ) : allOrdersDisplayed.length === 0 ? (
-                    renderEmptyState(
-                      activeSearchTerm
-                        ? `Non ci sono ordini con ID: ${activeSearchTerm}.`
-                        : filterMode === 'all'
-                        ? "Non ci sono ordini completati."
-                        : "Non ci sono ordini."
-                    )
-                  ) : (
-                    renderGroupedRows(allOrdersDisplayed, { isCompletedOnlyView: filterMode === 'all' })
-                  )}
+                  {renderEmptyState("Loading...")}
                 </tbody>
               </table>
+            </div>
+          ) : (
+            /* Ordini Stampati: completed orders + reprint config errors collapsible */
+            <div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                  {renderTableHeader()}
+                  <tbody className="divide-y divide-slate-100">
+                    {loading ? (
+                      renderEmptyState("Loading...")
+                    ) : allOrdersDisplayed.length === 0 ? (
+                      renderEmptyState(
+                        activeSearchTerm
+                          ? `Non ci sono ordini con ID: ${activeSearchTerm}.`
+                          : "Non ci sono ordini completati."
+                      )
+                    ) : (
+                      renderGroupedRows(allOrdersDisplayed, { isCompletedOnlyView: true })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Configuration Errors (Ristampa) collapsible — printed orders that failed on reprint */}
+              {!loading && (
+                <ReworkSection
+                  orders={reprintConfigErrors}
+                  title="Configuration Errors (Ristampa)"
+                  showDiscardColumn={true}
+                  activeSearchTerm={activeSearchTerm}
+                  processingFronteOrders={processingFronteOrders}
+                  processingRetroOrders={processingRetroOrders}
+                  onProcessSide={handleSideProcessing}
+                  onErrorClick={handleErrorClick}
+                  onDiscardClick={(order) => setDiscardConfirmOrder(order)}
+                  assetRules={assetRules}
+                />
+              )}
             </div>
           )}
         </section>
@@ -1243,7 +1306,7 @@ export default function App() {
                 Are you sure you want to stop reprinting <strong>{discardConfirmOrder.orderId}</strong> and move it back to history?
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                This will not delete the order. It will simply mark it as complete and remove it from the "Rework" queue.
+                This will not delete the order. It will simply mark it as complete and remove it from the configuration errors queue.
               </p>
             </div>
             

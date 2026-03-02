@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
-import { notInArray, eq, sql, and, isNotNull, or, isNull } from "drizzle-orm";
+import { eq, sql, and, isNotNull } from "drizzle-orm";
 import pLimit from "p-limit";
 import { db } from "./db.js";
 import { orders } from "./schema.js";
@@ -229,18 +229,15 @@ export async function syncOrders(): Promise<SyncResult> {
     }
   }
 
-  if (incomingOrderItemIds.size > 0) {
-    const ids = Array.from(incomingOrderItemIds);
-    const deleteResult = db
-      .delete(orders)
-      .where(or(notInArray(orders.orderItemId, ids), isNull(orders.orderItemId)))
-      .run();
+  const RETENTION_DAYS = 7;
+  const deleteResult = db
+    .delete(orders)
+    .where(sql`${orders.createdAt} < datetime('now', '-${sql.raw(String(RETENTION_DAYS))} days')`)
+    .run();
 
-    deleted = deleteResult.changes;
-    
-    if (deleted > 0) {
-      logger.info({ deleted }, "Removed orders no longer in feed");
-    }
+  deleted = deleteResult.changes;
+  if (deleted > 0) {
+    logger.info({ deleted, retentionDays: RETENTION_DAYS }, "Removed orders older than 7 days");
   }
 
   if (totalParsed > 0 && added + skipped + duplicates === 0) {

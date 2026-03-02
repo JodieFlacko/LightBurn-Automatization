@@ -72,7 +72,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       setInitialTemplatesPath(data.templatesPath || "");
     } catch (error) {
       console.error("Failed to fetch config:", error);
-      showToast("Failed to load configuration", 'error');
+      showToast("Impossibile caricare la configurazione", 'error');
     } finally {
       setIsLoadingConfig(false);
     }
@@ -83,7 +83,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
     const trimmedUrl = feedUrl.trim();
     
     if (!trimmedUrl) {
-      showToast("Feed URL cannot be empty", 'error');
+      showToast("L'URL del feed non può essere vuoto", 'error');
       return;
     }
 
@@ -104,7 +104,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         const msg = errorData.message || "Unknown error occurred";
         
         // Show red error toast for 10 seconds
-        showToast("Failed to save: " + msg, 'error', 10000);
+        showToast("Salvataggio fallito: " + msg, 'error', 10000);
         
         // STOP: Do not show success message. Do not close form. Return early.
         setIsSavingConfig(false);
@@ -116,10 +116,10 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       // Success path
       setInitialFeedUrl(trimmedUrl);
       setInitialTemplatesPath(templatesPath);
-      showToast("Configuration saved successfully", 'success');
+      showToast("Configurazione salvata con successo", 'success');
     } catch (error) {
       console.error("Failed to save config:", error);
-      showToast(error instanceof Error ? error.message : "Failed to save configuration", 'error', 10000);
+      showToast(error instanceof Error ? error.message : "Impossibile salvare la configurazione", 'error', 10000);
     } finally {
       setIsSavingConfig(false);
     }
@@ -130,7 +130,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
     const trimmedUrl = feedUrl.trim();
     
     if (!trimmedUrl) {
-      showToast("Feed URL cannot be empty", 'error');
+      showToast("L'URL del feed non può essere vuoto", 'error');
       return;
     }
 
@@ -145,13 +145,13 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       const data = await response.json();
 
       if (data.success) {
-        showToast("✓ Connection successful! Feed is accessible.", 'success');
+        showToast("✓ Connessione riuscita! Il feed è accessibile.", 'success');
       } else {
-        showToast(`✗ Connection failed: ${data.message}`, 'error');
+        showToast(`✗ Connessione fallita: ${data.message}`, 'error');
       }
     } catch (error) {
       console.error("Failed to test connection:", error);
-      showToast("✗ Connection test failed: Network error", 'error');
+      showToast("✗ Test di connessione fallito: Errore di rete", 'error');
     } finally {
       setIsTestingConnection(false);
     }
@@ -165,7 +165,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       setRules(data.rules ?? []);
     } catch (error) {
       console.error("Failed to fetch rules:", error);
-      showToast("Failed to load rules", 'error');
+      showToast("Impossibile caricare le regole", 'error');
     } finally {
       setLoading(false);
     }
@@ -179,7 +179,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       setAssetRules(data.rules ?? []);
     } catch (error) {
       console.error("Failed to fetch asset rules:", error);
-      showToast("Failed to load asset rules", 'error');
+      showToast("Impossibile caricare le regole risorse", 'error');
     } finally {
       setLoading(false);
     }
@@ -188,7 +188,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
   const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!skuPattern.trim() || !templateFilename.trim()) {
-      showToast("Both SKU pattern and template filename are required", 'error');
+      showToast("Il pattern SKU e il nome del file template sono obbligatori", 'error');
       return;
     }
 
@@ -206,24 +206,24 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || "Failed to create rule");
+        throw new Error(data.error || "Impossibile creare la regola");
       }
 
-      showToast("Rule added successfully", 'success');
+      showToast("Regola aggiunta con successo", 'success');
       setSkuPattern("");
       setTemplateFilename("");
       setPriority(0);
       await fetchRules();
     } catch (error) {
       console.error("Failed to add rule:", error);
-      showToast(error instanceof Error ? error.message : "Failed to add rule", 'error');
+      showToast(error instanceof Error ? error.message : "Impossibile aggiungere la regola", 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteRule = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this rule?")) {
+    if (!confirm("Sei sicuro di voler eliminare questa regola?")) {
       return;
     }
 
@@ -233,21 +233,21 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to delete rule");
+        throw new Error("Impossibile eliminare la regola");
       }
 
-      showToast("Rule deleted successfully", 'success');
+      showToast("Regola eliminata con successo", 'success');
       await fetchRules();
     } catch (error) {
       console.error("Failed to delete rule:", error);
-      showToast("Failed to delete rule", 'error');
+      showToast("Impossibile eliminare la regola", 'error');
     }
   };
 
   const handleAddAssetRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!triggerKeyword.trim() || !assetValue.trim()) {
-      showToast("Both keyword and value are required", 'error');
+      showToast("La parola chiave e il valore sono obbligatori", 'error');
       return;
     }
 
@@ -265,23 +265,23 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || "Failed to create asset rule");
+        throw new Error(data.error || "Impossibile creare la regola risorsa");
       }
 
-      showToast("Asset rule added successfully", 'success');
+      showToast("Regola risorsa aggiunta con successo", 'success');
       setTriggerKeyword("");
       setAssetValue("");
       await fetchAssetRules();
     } catch (error) {
       console.error("Failed to add asset rule:", error);
-      showToast(error instanceof Error ? error.message : "Failed to add asset rule", 'error');
+      showToast(error instanceof Error ? error.message : "Impossibile aggiungere la regola risorsa", 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteAssetRule = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this asset rule?")) {
+    if (!confirm("Sei sicuro di voler eliminare questa regola risorsa?")) {
       return;
     }
 
@@ -291,14 +291,14 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to delete asset rule");
+        throw new Error("Impossibile eliminare la regola risorsa");
       }
 
-      showToast("Asset rule deleted successfully", 'success');
+      showToast("Regola risorsa eliminata con successo", 'success');
       await fetchAssetRules();
     } catch (error) {
       console.error("Failed to delete asset rule:", error);
-      showToast("Failed to delete asset rule", 'error');
+      showToast("Impossibile eliminare la regola risorsa", 'error');
     }
   };
 
@@ -320,16 +320,16 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">Settings</h1>
+            <h1 className="text-2xl font-semibold">Impostazioni</h1>
             <p className="text-sm text-slate-600">
-              Configure templates and design assets.
+              Configura i template e le risorse grafiche.
             </p>
           </div>
           <button
             className="rounded bg-slate-600 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
             onClick={onBack}
           >
-            Back to Orders
+            Torna agli Ordini
           </button>
         </header>
 
@@ -351,11 +351,11 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
               </svg>
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-orange-900 mb-1">
-                  Configuration Required
+                  Configurazione Richiesta
                 </h3>
                 <p className="text-sm text-orange-800">
-                  No template found for SKU '<span className="font-mono font-semibold">{suggestedSku}</span>'. 
-                  Add a template rule below, then go back to orders and use "Reset & Retry" to process the order.
+                  Nessun template trovato per lo SKU '<span className="font-mono font-semibold">{suggestedSku}</span>'. 
+                  Aggiungi una regola template qui sotto, poi torna agli ordini e usa "Reset & Riprova" per processare l'ordine.
                 </p>
               </div>
             </div>
@@ -364,15 +364,15 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
 
         {/* General Configuration Section */}
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-slate-800">General Configuration</h2>
+          <h2 className="mb-4 text-lg font-semibold text-slate-800">Configurazione Generale</h2>
           
           {isLoadingConfig ? (
-            <div className="text-center py-4 text-slate-500">Loading configuration...</div>
+            <div className="text-center py-4 text-slate-500">Caricamento configurazione...</div>
           ) : (
             <div className="space-y-4">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Amazon Orders Feed URL / File Path
+                  URL Feed Ordini Amazon / Percorso File
                 </label>
                 <input
                   type="text"
@@ -383,13 +383,13 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                   disabled={isSavingConfig || isTestingConnection}
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Enter a web URL (http://...) or a local file path (C:\Users\...)
+                  Inserisci un URL web (http://...) o un percorso file locale (C:\Utenti\...)
                 </p>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Templates Directory
+                  Cartella Template
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -405,13 +405,13 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                     className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     onClick={() => setTemplatesPath("")}
                     disabled={isSavingConfig || isTestingConnection}
-                    title="Clear custom path and use auto-detected location"
+                    title="Rimuovi il percorso personalizzato e usa quello rilevato automaticamente"
                   >
-                    Use Default
+                    Usa Predefinito
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Full path to your LightBurn templates folder. Leave empty to use default location.
+                  Percorso completo della cartella template di LightBurn. Lascia vuoto per usare la posizione predefinita.
                 </p>
               </div>
 
@@ -428,7 +428,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                   )}
-                  {isTestingConnection ? "Testing..." : "Test Connection"}
+                  {isTestingConnection ? "Test in corso..." : "Testa Connessione"}
                 </button>
                 
                 <button
@@ -443,7 +443,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                   )}
-                  {isSavingConfig ? "Saving..." : "Save Configuration"}
+                  {isSavingConfig ? "Salvataggio..." : "Salva Configurazione"}
                 </button>
               </div>
             </div>
@@ -460,7 +460,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
             }`}
             onClick={() => setActiveTab('templates')}
           >
-            Template Rules
+            Regole Template
           </button>
           <button
             className={`px-4 py-2 text-sm font-medium transition-colors ${
@@ -470,7 +470,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
             }`}
             onClick={() => setActiveTab('assets')}
           >
-            Design Assets
+            Risorse Grafiche
           </button>
         </div>
 
@@ -479,44 +479,44 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
           <>
             {/* Add New Rule Form */}
             <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-semibold text-slate-800">Add New Template Rule</h2>
+              <h2 className="mb-4 text-lg font-semibold text-slate-800">Aggiungi Nuova Regola Template</h2>
           <form onSubmit={handleAddRule} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  SKU Pattern
+                  Pattern SKU
                 </label>
                 <input
                   type="text"
                   className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  placeholder="e.g., MUG- or PEN"
+                  placeholder="es. MUG- o PEN"
                   value={skuPattern}
                   onChange={(e) => setSkuPattern(e.target.value)}
                   disabled={saving}
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Matches if SKU contains this text
+                  Corrisponde se lo SKU contiene questo testo
                 </p>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Template Filename
+                  Nome File Template
                 </label>
                 <input
                   type="text"
                   className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  placeholder="e.g., mug.lbrn2"
+                  placeholder="es. mug.lbrn2"
                   value={templateFilename}
                   onChange={(e) => setTemplateFilename(e.target.value)}
                   disabled={saving}
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Filename in templates/ folder
+                  Nome file nella cartella templates/
                 </p>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Priority
+                  Priorità
                 </label>
                 <input
                   type="number"
@@ -527,7 +527,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                   disabled={saving}
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Higher = higher priority
+                  Più alto = priorità maggiore
                 </p>
               </div>
             </div>
@@ -536,7 +536,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
               className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
               disabled={saving}
             >
-              {saving ? "Adding..." : "Add Rule"}
+              {saving ? "Aggiunta..." : "Aggiungi Regola"}
             </button>
           </form>
         </section>
@@ -544,29 +544,29 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
         {/* Template Rules List */}
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="text-sm font-medium text-slate-700">Existing Rules</h2>
+            <h2 className="text-sm font-medium text-slate-700">Regole Esistenti</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">SKU Pattern</th>
-                  <th className="px-4 py-3">Template Filename</th>
-                  <th className="px-4 py-3">Priority</th>
-                  <th className="px-4 py-3">Actions</th>
+                  <th className="px-4 py-3">Pattern SKU</th>
+                  <th className="px-4 py-3">Nome File Template</th>
+                  <th className="px-4 py-3">Priorità</th>
+                  <th className="px-4 py-3">Azioni</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
                     <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
-                      Loading...
+                      Caricamento...
                     </td>
                   </tr>
                 ) : rules.length === 0 ? (
                   <tr>
                     <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
-                      No rules configured. Add a rule above to get started.
+                      Nessuna regola configurata. Aggiungi una regola qui sopra per iniziare.
                     </td>
                   </tr>
                 ) : (
@@ -584,7 +584,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                           className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
                           onClick={() => handleDeleteRule(rule.id)}
                         >
-                          Delete
+                          Elimina
                         </button>
                       </td>
                     </tr>
@@ -602,28 +602,28 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
           <>
             {/* Add New Asset Rule Form */}
             <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-semibold text-slate-800">Add New Asset Rule</h2>
+              <h2 className="mb-4 text-lg font-semibold text-slate-800">Aggiungi Nuova Regola Risorsa</h2>
               <form onSubmit={handleAddAssetRule} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">
-                      Trigger Keyword
+                      Parola Chiave
                     </label>
                     <input
                       type="text"
                       className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      placeholder="e.g., Skull or Red"
+                      placeholder="es. Teschio o Rosso"
                       value={triggerKeyword}
                       onChange={(e) => setTriggerKeyword(e.target.value)}
                       disabled={saving}
                     />
                     <p className="mt-1 text-xs text-slate-500">
-                      Keyword in Amazon custom field
+                      Parola chiave nel campo personalizzato Amazon
                     </p>
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">
-                      Asset Type
+                      Tipo di Risorsa
                     </label>
                     <select
                       className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -631,29 +631,29 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                       onChange={(e) => setAssetType(e.target.value as 'image' | 'color')}
                       disabled={saving}
                     >
-                      <option value="image">Image</option>
-                      <option value="color">Color</option>
+                      <option value="image">Immagine</option>
+                      <option value="color">Colore</option>
                     </select>
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">
-                      Value
+                      Valore
                     </label>
                     <input
                       type="text"
                       className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       placeholder={
                         assetType === 'image' 
-                          ? 'e.g., skull.png' 
-                          : 'e.g., #ff0000'
+                          ? 'es. teschio.png' 
+                          : 'es. #ff0000'
                       }
                       value={assetValue}
                       onChange={(e) => setAssetValue(e.target.value)}
                       disabled={saving}
                     />
                     <p className="mt-1 text-xs text-slate-500">
-                      {assetType === 'image' && 'Filename in assets/ folder'}
-                      {assetType === 'color' && 'Hex color code'}
+                      {assetType === 'image' && 'Nome file nella cartella assets/'}
+                      {assetType === 'color' && 'Codice colore esadecimale'}
                     </p>
                   </div>
                 </div>
@@ -662,7 +662,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                   className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
                   disabled={saving}
                 >
-                  {saving ? "Adding..." : "Add Asset Rule"}
+                  {saving ? "Aggiunta..." : "Aggiungi Regola Risorsa"}
                 </button>
               </form>
             </section>
@@ -670,29 +670,29 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
             {/* Asset Rules List */}
             <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 px-4 py-3">
-                <h2 className="text-sm font-medium text-slate-700">Existing Asset Rules</h2>
+                <h2 className="text-sm font-medium text-slate-700">Regole Risorse Esistenti</h2>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Trigger Keyword</th>
-                      <th className="px-4 py-3">Asset Type</th>
-                      <th className="px-4 py-3">Value</th>
-                      <th className="px-4 py-3">Actions</th>
+                      <th className="px-4 py-3">Parola Chiave</th>
+                      <th className="px-4 py-3">Tipo di Risorsa</th>
+                      <th className="px-4 py-3">Valore</th>
+                      <th className="px-4 py-3">Azioni</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
                       <tr>
                         <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
-                          Loading...
+                          Caricamento...
                         </td>
                       </tr>
                     ) : assetRules.length === 0 ? (
                       <tr>
                         <td className="px-4 py-4 text-center text-slate-500" colSpan={4}>
-                          No asset rules configured. Add a rule above to get started.
+                          Nessuna regola risorsa configurata. Aggiungi una regola qui sopra per iniziare.
                         </td>
                       </tr>
                     ) : (
@@ -724,7 +724,7 @@ export default function Settings({ onBack, suggestedSku }: SettingsProps) {
                               className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
                               onClick={() => handleDeleteAssetRule(rule.id)}
                             >
-                              Delete
+                              Elimina
                             </button>
                           </td>
                         </tr>
